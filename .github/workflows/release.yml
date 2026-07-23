@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      snapshot:
+        description: "Run a GoReleaser snapshot (no publish)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: >-
+            ${{
+              github.event_name == 'workflow_dispatch' && inputs.snapshot
+                && 'release --snapshot --clean --skip=publish'
+                || 'release --clean'
+            }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

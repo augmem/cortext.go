@@ -1,0 +1,15 @@
+# Build caches from scripts/build_native.py
+/build/
+
+# GoReleaser
+/dist/
+
+# Reassembled model cache (chunks under models/ are checked in)
+.cortext-assets/
+**/AIST-87M-GGUF/AIST-87M_q8_0.gguf
+**/AIST-87M-GGUF/AIST-87M_q5_1.gguf
+
+# Go
+*.test
+*.out
+/vendor/

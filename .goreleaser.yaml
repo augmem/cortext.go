@@ -1,0 +1,71 @@
+# GoReleaser config for the cortext.go module.
+# Library-only: no binaries. Releases tag the module for go get / pkg.go.dev
+# and publish a checksummed source archive (includes native/ + model chunks).
+version: 2
+
+project_name: cortext.go
+
+before:
+  hooks:
+    - go mod tidy
+    - env CGO_ENABLED=0 go test ./...
+
+builds:
+  - skip: true
+
+source:
+  enabled: true
+  name_template: "{{ .ProjectName }}-{{ .Version }}-source"
+  format: tar.gz
+
+checksum:
+  name_template: "{{ .ProjectName }}-{{ .Version }}-checksums.txt"
+  algorithm: sha256
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))?!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))?!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+release:
+  github:
+    owner: augmem
+    name: cortext.go
+  name_template: "v{{ .Version }}"
+  draft: false
+  prerelease: auto
+  mode: replace
+  header: |
+    Pure-Go Cortext bindings (`CGO_ENABLED=0`) with Zig-built shared libraries
+    and a Git-chunked AIST model.
+
+    ```bash
+    go get github.com/augmem/cortext.go@v{{ .Version }}
+    ```
+
+    The module ships platform natives under `native/` and model shards under
+    `models/`. First `New` reassembles the model into a local cache.
+  footer: |
+    Bundled Cortext C ABI version is reported by `cortext.Version()`.
+
+    Full module docs: https://pkg.go.dev/github.com/augmem/cortext.go@v{{ .Version }}
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+announce:
+  skip: true

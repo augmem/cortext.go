@@ -56,19 +56,15 @@ func MaterializeModel(dbPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if v, ok := materializedOnce.Load(cacheDir); ok {
-		if path, ok := v.(string); ok && path != "" {
-			return path, nil
-		}
+	if path, ok := cachedMaterialized(cacheDir); ok {
+		return path, nil
 	}
 
 	materializeMu.Lock()
 	defer materializeMu.Unlock()
 
-	if v, ok := materializedOnce.Load(cacheDir); ok {
-		if path, ok := v.(string); ok && path != "" {
-			return path, nil
-		}
+	if path, ok := cachedMaterialized(cacheDir); ok {
+		return path, nil
 	}
 
 	path, err := materializeModelLocked(cacheDir)
@@ -77,6 +73,23 @@ func MaterializeModel(dbPath string) (string, error) {
 	}
 	materializedOnce.Store(cacheDir, path)
 	return path, nil
+}
+
+func cachedMaterialized(cacheDir string) (string, bool) {
+	v, ok := materializedOnce.Load(cacheDir)
+	if !ok {
+		return "", false
+	}
+	path, ok := v.(string)
+	if !ok || path == "" {
+		return "", false
+	}
+	// Temp test caches are deleted between tests; never return a vanished path.
+	if st, err := os.Stat(path); err != nil || st.IsDir() {
+		materializedOnce.Delete(cacheDir)
+		return "", false
+	}
+	return path, true
 }
 
 func materializeModelLocked(cacheDir string) (string, error) {

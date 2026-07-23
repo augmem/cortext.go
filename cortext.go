@@ -6,6 +6,7 @@ package cortext
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -507,9 +508,16 @@ func decodeEmbeddingResult(payload []byte, err error) (EmbeddingResult, error) {
 
 // ensureModelEnv sets CORTEXT_AIST_MODEL_PATH when unset if a model is found.
 // Returns a restore function that puts the previous env value back.
+//
+// On Windows the native CRT's getenv may not see os.Setenv alone, so we also
+// push the variable through the CRT putenv path (see setNativeEnv).
 func ensureModelEnv(dbPath string) (func(), error) {
-	if os.Getenv("CORTEXT_AIST_MODEL_PATH") != "" {
-		return func() {}, nil
+	const key = "CORTEXT_AIST_MODEL_PATH"
+	if prev := os.Getenv(key); prev != "" {
+		if st, err := os.Stat(prev); err == nil && !st.IsDir() {
+			return func() {}, nil
+		}
+		// Stale override: fall through and re-resolve.
 	}
 
 	path, err := resolveAISTModel(dbPath)
@@ -520,11 +528,20 @@ func ensureModelEnv(dbPath string) (func(), error) {
 		// Leave unset; native library may still resolve via relative models/.
 		return func() {}, nil
 	}
-	if err := os.Setenv("CORTEXT_AIST_MODEL_PATH", path); err != nil {
+	if st, err := os.Stat(path); err != nil || st.IsDir() {
+		return nil, fmt.Errorf("resolved AIST model path is missing: %s", path)
+	}
+
+	previous, hadPrevious := os.LookupEnv(key)
+	if err := setNativeEnv(key, path); err != nil {
 		return nil, err
 	}
 	return func() {
-		_ = os.Unsetenv("CORTEXT_AIST_MODEL_PATH")
+		if hadPrevious {
+			_ = setNativeEnv(key, previous)
+			return
+		}
+		_ = unsetNativeEnv(key)
 	}, nil
 }
 

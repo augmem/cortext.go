@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-07-23
+
+### Fixed
+
+- Windows CI: binary `.gitattributes` for model/native assets (no CRLF rewrite)
+- Windows runtime: set `CORTEXT_AIST_MODEL_PATH` via CRT `_putenv_s` so the native library's `getenv` sees it
+- Drop memoized materialize paths when the reassembled model file no longer exists
+
 ## [1.2.1] - 2026-07-23
 
 ### Fixed
@@ -24,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/build_native.py` and `scripts/shard_model.py` for refreshing artifacts
 - GitHub Actions CI and GoReleaser release workflow
 
-[Unreleased]: https://github.com/augmem/cortext.go/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/augmem/cortext.go/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/augmem/cortext.go/releases/tag/v1.2.2
 [1.2.1]: https://github.com/augmem/cortext.go/releases/tag/v1.2.1
 [1.2.0]: https://github.com/augmem/cortext.go/compare/v1.2.0...v1.2.1

@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
-
-	"github.com/ebitengine/purego"
 )
 
 // Supported platform tags for bundled shared libraries (Zig cross-builds).
@@ -118,13 +116,13 @@ func loadLibrary() error {
 			if st, err := os.Stat(path); err != nil || st.IsDir() {
 				continue
 			}
-			handle, err := purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_LOCAL)
+			handle, err := openLibrary(path)
 			if err != nil {
-				lastErr = fmt.Errorf("dlopen %s: %w", path, err)
+				lastErr = fmt.Errorf("load library %s: %w", path, err)
 				continue
 			}
 			if err := registerFuncs(handle); err != nil {
-				_ = purego.Dlclose(handle)
+				_ = closeLibrary(handle)
 				lastErr = err
 				continue
 			}

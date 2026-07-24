@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-07-24
+
+### Changed
+
+- **Hard cutover** to augmem/cortext release assets only (`EnsureAssets`)
+- Download + SHA-256 verify `cortext-assets-1.2.4.tar.gz` on first use
+- Load only `CORTEXT_LIBRARY_PATH` or the release-asset native for the host tag
+- Rely on embed-on natives for AIST (no auto model-path search or materialize)
+- `MaterializeModel` still available, and always reads shards from release assets
+
+### Removed
+
+- Vendored `native/` and `models/` trees from the module repository
+- Sibling cortext checkout / ffi-release / zig-out library search
+- Package-local and CWD model discovery
+- `scripts/build_native.py` and `scripts/shard_model.py`
+
 ## [1.2.2] - 2026-07-23
 
 ### Fixed
@@ -32,7 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/build_native.py` and `scripts/shard_model.py` for refreshing artifacts
 - GitHub Actions CI and GoReleaser release workflow
 
-[Unreleased]: https://github.com/augmem/cortext.go/compare/v1.2.2...HEAD
-[1.2.2]: https://github.com/augmem/cortext.go/releases/tag/v1.2.2
+[Unreleased]: https://github.com/augmem/cortext.go/compare/v1.2.4...HEAD
+[1.2.4]: https://github.com/augmem/cortext.go/releases/tag/v1.2.4
+[1.2.2]: https://github.com/augmem/cortext.go/compare/v1.2.2...v1.2.4
 [1.2.1]: https://github.com/augmem/cortext.go/releases/tag/v1.2.1
 [1.2.0]: https://github.com/augmem/cortext.go/compare/v1.2.0...v1.2.1

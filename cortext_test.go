@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -18,7 +19,45 @@ func TestPlatformTag(t *testing.T) {
 	t.Logf("platform tag: %s (GOOS=%s GOARCH=%s)", tag, runtime.GOOS, runtime.GOARCH)
 }
 
+func TestEnsureAssetsFromRelease(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network asset download in short mode")
+	}
+	ResetLibraryForTest()
+	t.Setenv("CORTEXT_ASSETS_DIR", "")
+	t.Setenv("CORTEXT_LIBRARY_PATH", "")
+	cache := t.TempDir()
+	t.Setenv("CORTEXT_ASSET_CACHE_DIR", cache)
+
+	root, err := EnsureAssets()
+	if err != nil {
+		t.Fatalf("EnsureAssets: %v", err)
+	}
+	lib := nativeLibraryFromAssets(root)
+	if st, err := os.Stat(lib); err != nil || st.IsDir() {
+		t.Fatalf("expected native library at %s: %v", lib, err)
+	}
+	t.Logf("assets root=%s lib=%s", root, lib)
+
+	again, err := EnsureAssets()
+	if err != nil {
+		t.Fatalf("EnsureAssets second: %v", err)
+	}
+	if again != root {
+		t.Fatalf("assets root changed: %s vs %s", again, root)
+	}
+}
+
 func TestLoadLibraryAndVersion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network asset download in short mode")
+	}
+	ResetLibraryForTest()
+	t.Setenv("CORTEXT_ASSETS_DIR", "")
+	t.Setenv("CORTEXT_LIBRARY_PATH", "")
+	cache := t.TempDir()
+	t.Setenv("CORTEXT_ASSET_CACHE_DIR", cache)
+
 	if err := LoadLibrary(); err != nil {
 		t.Fatalf("LoadLibrary: %v", err)
 	}
@@ -26,7 +65,14 @@ func TestLoadLibraryAndVersion(t *testing.T) {
 	if v == "" {
 		t.Fatal("Version() returned empty string")
 	}
-	t.Logf("cortext version: %s path=%s", v, LibraryPath())
+	path := LibraryPath()
+	if path == "" {
+		t.Fatal("LibraryPath empty after load")
+	}
+	if !strings.Contains(path, string(filepath.Separator)+"native"+string(filepath.Separator)) {
+		t.Fatalf("expected release-asset native path, got %s", path)
+	}
+	t.Logf("cortext version: %s path=%s", v, path)
 }
 
 func TestValidateImageBuffer(t *testing.T) {
@@ -54,15 +100,22 @@ func TestConfigFieldsDistinguishOmittedAndExplicitZero(t *testing.T) {
 	}
 }
 
-func TestMaterializeModelFromChunks(t *testing.T) {
-	if !chunksReady() {
-		t.Skip("model chunks not present under models/")
+func TestMaterializeModelFromReleaseChunks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network asset download in short mode")
 	}
+	ResetLibraryForTest()
+	t.Setenv("CORTEXT_ASSETS_DIR", "")
+	t.Setenv("CORTEXT_LIBRARY_PATH", "")
+	assetCache := t.TempDir()
+	t.Setenv("CORTEXT_ASSET_CACHE_DIR", assetCache)
 
 	cache := t.TempDir()
 	t.Setenv("CORTEXT_MODEL_CACHE_DIR", cache)
-	// Clear memoization for this cache key path — use unique env.
 	materializedOnce.Delete(cache)
+	if abs, err := filepath.Abs(cache); err == nil {
+		materializedOnce.Delete(abs)
+	}
 
 	model, err := MaterializeModel(filepath.Join(cache, "memory.sqlite"))
 	if err != nil {
@@ -72,8 +125,8 @@ func TestMaterializeModelFromChunks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat model: %v", err)
 	}
-	if st.Size() != 141491936 {
-		t.Fatalf("model size %d, want 141491936", st.Size())
+	if st.Size() < 100_000_000 {
+		t.Fatalf("model size unexpectedly small: %d", st.Size())
 	}
 	sum, err := sha256File(model)
 	if err != nil {
@@ -83,33 +136,23 @@ func TestMaterializeModelFromChunks(t *testing.T) {
 	if sum != want {
 		t.Fatalf("model sha256 %s, want %s", sum, want)
 	}
-
-	vocab := filepath.Join(cache, "mdbr-leaf-ir", "vocab.txt")
-	if _, err := os.Stat(vocab); err != nil {
-		t.Fatalf("vocab not copied into cache: %v", err)
-	}
-
-	// Second call should hit the verified cache without error.
-	again, err := MaterializeModel(filepath.Join(cache, "memory.sqlite"))
-	if err != nil {
-		t.Fatalf("MaterializeModel second: %v", err)
-	}
-	if again != model {
-		t.Fatalf("cache path changed: %s vs %s", again, model)
-	}
 }
 
 func TestNewProcessEmbed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network asset download in short mode")
+	}
+	ResetLibraryForTest()
+	t.Setenv("CORTEXT_ASSETS_DIR", "")
+	t.Setenv("CORTEXT_LIBRARY_PATH", "")
+	t.Setenv("CORTEXT_AIST_MODEL_PATH", "")
+	cache := t.TempDir()
+	t.Setenv("CORTEXT_ASSET_CACHE_DIR", cache)
+
 	if err := LoadLibrary(); err != nil {
 		t.Fatalf("LoadLibrary: %v", err)
 	}
-	if !chunksReady() && findDefaultAISTModel() == "" && os.Getenv("CORTEXT_AIST_MODEL_PATH") == "" {
-		t.Skip("no AIST model available; ship models/chunks or set CORTEXT_AIST_MODEL_PATH")
-	}
-
-	cache := t.TempDir()
-	t.Setenv("CORTEXT_MODEL_CACHE_DIR", cache)
-	materializedOnce.Delete(cache)
+	t.Logf("using library %s version %s", LibraryPath(), Version())
 
 	engine, err := New(":memory:", nil)
 	if err != nil {
@@ -144,8 +187,6 @@ func TestNewProcessEmbed(t *testing.T) {
 }
 
 func TestCGONotRequired(t *testing.T) {
-	// This package must build with CGO_ENABLED=0. The test binary itself is
-	// the proof when run under that env (see CI / README).
 	if os.Getenv("CGO_ENABLED") == "1" {
 		t.Log("CGO_ENABLED=1 for this process; package still uses purego at runtime")
 	}

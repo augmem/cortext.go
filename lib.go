@@ -8,20 +8,11 @@ import (
 	"sync"
 )
 
-// Supported platform tags for bundled shared libraries (Zig cross-builds).
-var supportedNativeTargets = map[string]struct{}{
-	"linux-x86_64":    {},
-	"linux-aarch64":   {},
-	"macos-x86_64":    {},
-	"macos-aarch64":   {},
-	"windows-x86_64":  {},
-	"windows-aarch64": {},
-}
-
 var (
 	libOnce   sync.Once
 	libHandle uintptr
 	libErr    error
+	libPath   string
 )
 
 func platformTag() string {
@@ -60,115 +51,78 @@ func libraryNameForTag(tag string) string {
 	}
 }
 
-func packageDir() string {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		return ""
-	}
-	return filepath.Dir(file)
-}
-
-func candidateLibraryPaths() []string {
-	names := []string{"libcortext.dylib", "libcortext.so", "cortext.dll", "libcortext.dll"}
-	var out []string
-
+func resolveLibraryPath() (string, error) {
 	if env := os.Getenv("CORTEXT_LIBRARY_PATH"); env != "" {
-		out = append(out, env)
+		if st, err := os.Stat(env); err != nil || st.IsDir() {
+			return "", fmt.Errorf("CORTEXT_LIBRARY_PATH is missing or not a file: %s", env)
+		}
+		abs, err := filepath.Abs(env)
+		if err != nil {
+			return env, nil
+		}
+		return abs, nil
 	}
 
-	tag := platformTag()
-	pkg := packageDir()
-	if pkg != "" {
-		if _, ok := supportedNativeTargets[tag]; ok {
-			out = append(out, filepath.Join(pkg, "native", tag, libraryNameForTag(tag)))
-		}
-		for _, name := range names {
-			out = append(out, filepath.Join(pkg, name))
-		}
+	root, err := EnsureAssets()
+	if err != nil {
+		return "", err
 	}
-
-	// Sibling cortext checkout (development layout: cortext.go next to cortext).
-	if pkg != "" {
-		parent := filepath.Dir(pkg)
-		for _, dir := range []string{
-			filepath.Join(parent, "cortext", "build", "ffi-release"),
-			filepath.Join(parent, "cortext", "build", "ffi-release", "lib"),
-			filepath.Join(parent, "cortext", "zig-out", "lib"),
-			filepath.Join(parent, "cortext", "zig-out", "bin"),
-			filepath.Join(parent, "cortext", "bindings", "python", "augmem", "cortext", "native", tag),
-		} {
-			for _, name := range names {
-				out = append(out, filepath.Join(dir, name))
-			}
-		}
+	path := nativeLibraryFromAssets(root)
+	if st, err := os.Stat(path); err != nil || st.IsDir() {
+		return "", fmt.Errorf("release assets missing native library for %s at %s", platformTag(), path)
 	}
-
-	return out
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path, nil
+	}
+	return abs, nil
 }
 
 func loadLibrary() error {
 	libOnce.Do(func() {
-		var lastErr error
-		for _, path := range candidateLibraryPaths() {
-			if path == "" {
-				continue
-			}
-			if st, err := os.Stat(path); err != nil || st.IsDir() {
-				continue
-			}
-			handle, err := openLibrary(path)
-			if err != nil {
-				lastErr = fmt.Errorf("load library %s: %w", path, err)
-				continue
-			}
-			if err := registerFuncs(handle); err != nil {
-				_ = closeLibrary(handle)
-				lastErr = err
-				continue
-			}
-			libHandle = handle
-			return
-		}
-
-		searched := ""
-		for _, p := range candidateLibraryPaths() {
-			searched += "\n  " + p
-		}
-		if lastErr != nil {
+		path, err := resolveLibraryPath()
+		if err != nil {
 			libErr = fmt.Errorf(
-				"could not load Cortext shared library for %s: %w\nsearched:%s\nset CORTEXT_LIBRARY_PATH or run scripts/build_native.py",
-				platformTag(), lastErr, searched,
+				"could not load Cortext shared library for %s: %w\nset CORTEXT_LIBRARY_PATH, CORTEXT_ASSETS_DIR, or allow download of github.com/augmem/cortext release assets v%s",
+				platformTag(), err, assetsVersion(),
 			)
 			return
 		}
-		libErr = fmt.Errorf(
-			"could not locate Cortext shared library for %s; bundled tags: linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64, windows-x86_64, windows-aarch64\nsearched:%s\nset CORTEXT_LIBRARY_PATH or run scripts/build_native.py",
-			platformTag(), searched,
-		)
+		handle, err := openLibrary(path)
+		if err != nil {
+			libErr = fmt.Errorf("load library %s: %w", path, err)
+			return
+		}
+		if err := registerFuncs(handle); err != nil {
+			_ = closeLibrary(handle)
+			libErr = err
+			return
+		}
+		libHandle = handle
+		libPath = path
 	})
 	return libErr
 }
 
 // LoadLibrary loads the native Cortext shared library if it is not already loaded.
-// New and Version call this automatically.
+// New and Version call this automatically. This may download release assets.
 func LoadLibrary() error {
 	return loadLibrary()
 }
 
 // LibraryPath returns the absolute path that was successfully loaded, if any.
 func LibraryPath() string {
-	if libHandle == 0 {
-		return ""
+	return libPath
+}
+
+// ResetLibraryForTest clears the process-wide library singleton (tests only).
+func ResetLibraryForTest() {
+	if libHandle != 0 {
+		_ = closeLibrary(libHandle)
 	}
-	// purego does not expose the path of an open handle; re-resolve from candidates.
-	for _, path := range candidateLibraryPaths() {
-		if st, err := os.Stat(path); err == nil && !st.IsDir() {
-			abs, err := filepath.Abs(path)
-			if err == nil {
-				return abs
-			}
-			return path
-		}
-	}
-	return ""
+	libOnce = sync.Once{}
+	libHandle = 0
+	libErr = nil
+	libPath = ""
+	ResetAssetsForTest()
 }

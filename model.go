@@ -36,21 +36,22 @@ type modelChunk struct {
 }
 
 var (
-	materializeMu   sync.Mutex
+	materializeMu    sync.Mutex
 	materializedOnce sync.Map // cacheDir -> model path
 )
 
-// MaterializeModel reassembles the checked-in AIST model chunks into a local
-// cache and returns the path to the complete .gguf file.
+// MaterializeModel reassembles AIST model chunks from the release asset tree
+// into a local cache and returns the full .gguf path.
 //
-// GitHub rejects single files over 100 MB, so the model is versioned as ordinary
-// Git chunks (same layout as cortext-hermes-plugin). This is local file I/O,
-// never a network download; every chunk and the assembled output are verified.
+// Release natives embed AIST and assemble it inside the library on first create.
+// Call MaterializeModel only when an external filesystem GGUF is required.
+//
+// Chunks always come from EnsureAssets() (augmem/cortext release tarball).
 //
 // Cache location (first match wins):
 //  1. CORTEXT_MODEL_CACHE_DIR
 //  2. sibling of dbPath: <dir(dbPath)>/.cortext-assets  (":memory:" → cwd)
-//  3. user cache: ~/Library/Caches/augmem/cortext/models (macOS), etc.
+//  3. user cache under augmem/cortext/models
 func MaterializeModel(dbPath string) (string, error) {
 	cacheDir, err := modelCacheDir(dbPath)
 	if err != nil {
@@ -67,7 +68,13 @@ func MaterializeModel(dbPath string) (string, error) {
 		return path, nil
 	}
 
-	path, err := materializeModelLocked(cacheDir)
+	root, err := EnsureAssets()
+	if err != nil {
+		return "", err
+	}
+	modelsRoot := modelsRootFromAssets(root)
+
+	path, err := materializeModelLocked(cacheDir, modelsRoot)
 	if err != nil {
 		return "", err
 	}
@@ -84,7 +91,6 @@ func cachedMaterialized(cacheDir string) (string, bool) {
 	if !ok || path == "" {
 		return "", false
 	}
-	// Temp test caches are deleted between tests; never return a vanished path.
 	if st, err := os.Stat(path); err != nil || st.IsDir() {
 		materializedOnce.Delete(cacheDir)
 		return "", false
@@ -92,8 +98,8 @@ func cachedMaterialized(cacheDir string) (string, bool) {
 	return path, true
 }
 
-func materializeModelLocked(cacheDir string) (string, error) {
-	manifest, err := loadModelManifest()
+func materializeModelLocked(cacheDir, modelsRoot string) (string, error) {
+	manifest, err := loadModelManifest(modelsRoot)
 	if err != nil {
 		return "", err
 	}
@@ -107,7 +113,7 @@ func materializeModelLocked(cacheDir string) (string, error) {
 
 	modelPath := filepath.Join(cacheDir, filepath.FromSlash(modelAssetName))
 	if ok, _ := fileHasSHA256(modelPath, asset.SHA256); ok {
-		if err := ensureVocabInCache(cacheDir, manifest); err != nil {
+		if err := ensureVocabInCache(cacheDir, modelsRoot, manifest); err != nil {
 			return "", err
 		}
 		return modelPath, nil
@@ -116,11 +122,10 @@ func materializeModelLocked(cacheDir string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(modelPath), 0o755); err != nil {
 		return "", err
 	}
-	if err := ensureVocabInCache(cacheDir, manifest); err != nil {
+	if err := ensureVocabInCache(cacheDir, modelsRoot, manifest); err != nil {
 		return "", err
 	}
 
-	modelsRoot := filepath.Join(packageDir(), "models")
 	tmp, err := os.CreateTemp(filepath.Dir(modelPath), ".aist-*.tmp")
 	if err != nil {
 		return "", err
@@ -153,7 +158,6 @@ func materializeModelLocked(cacheDir string) (string, error) {
 		return "", fmt.Errorf("cortext reassembled model checksum mismatch: got %s want %s", actual, asset.SHA256)
 	}
 	if err := os.Rename(tmpPath, modelPath); err != nil {
-		// Cross-device rename fallback.
 		if copyErr := copyPath(tmpPath, modelPath); copyErr != nil {
 			return "", fmt.Errorf("install reassembled model: %v / %w", err, copyErr)
 		}
@@ -162,7 +166,7 @@ func materializeModelLocked(cacheDir string) (string, error) {
 	return modelPath, nil
 }
 
-func ensureVocabInCache(cacheDir string, manifest *modelManifest) error {
+func ensureVocabInCache(cacheDir, modelsRoot string, manifest *modelManifest) error {
 	asset, err := findModelAsset(manifest, vocabAssetName)
 	if err != nil {
 		return err
@@ -171,7 +175,7 @@ func ensureVocabInCache(cacheDir string, manifest *modelManifest) error {
 	if ok, _ := fileHasSHA256(dest, asset.SHA256); ok {
 		return nil
 	}
-	src := filepath.Join(packageDir(), "models", filepath.FromSlash(vocabAssetName))
+	src := filepath.Join(modelsRoot, filepath.FromSlash(vocabAssetName))
 	if ok, actual := fileHasSHA256(src, asset.SHA256); !ok {
 		if actual == "" {
 			return fmt.Errorf("cortext vocab asset missing: %s", vocabAssetName)
@@ -184,8 +188,8 @@ func ensureVocabInCache(cacheDir string, manifest *modelManifest) error {
 	return copyPath(src, dest)
 }
 
-func loadModelManifest() (*modelManifest, error) {
-	path := filepath.Join(packageDir(), "models", "manifest.json")
+func loadModelManifest(modelsRoot string) (*modelManifest, error) {
+	path := filepath.Join(modelsRoot, "manifest.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("cortext model manifest unreadable: %w", err)
@@ -216,7 +220,6 @@ func modelCacheDir(dbPath string) (string, error) {
 			return filepath.Join(filepath.Dir(abs), ".cortext-assets"), nil
 		}
 	}
-	// :memory: / empty → process cwd sibling cache, matching hermes plugin.
 	cwd, err := os.Getwd()
 	if err == nil {
 		return filepath.Join(cwd, ".cortext-assets"), nil

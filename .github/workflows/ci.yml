@@ -38,7 +38,8 @@ jobs:
         run: |
           go version
           go mod verify
-          go test ./... -count=1 -v
+          # First run downloads augmem/cortext release assets into the runner cache dir.
+          go test ./... -count=1 -v -timeout 20m
 
   goreleaser-check:
     name: goreleaser check

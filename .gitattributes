@@ -1,11 +1,1 @@
-# Keep natives, model shards, and tokenizer vocab byte-identical across OSes.
-# Windows CRLF conversion would break SHA-256 checks used by MaterializeModel.
-
-*.so              binary
-*.dylib           binary
-*.dll             binary
-*.part-*          binary
-*.gguf            binary
-models/**         -text
-native/**         -text
-models/mdbr-leaf-ir/vocab.txt  binary
+# No large binaries are tracked in this module; release assets are downloaded.

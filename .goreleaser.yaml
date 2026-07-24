@@ -8,7 +8,8 @@ project_name: cortext.go
 before:
   hooks:
     - go mod tidy
-    - env CGO_ENABLED=0 go test ./...
+    # Integration tests download release assets; keep a bound so hooks cannot hang.
+    - env CGO_ENABLED=0 go test ./... -count=1 -timeout 20m
 
 builds:
   - skip: true

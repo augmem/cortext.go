@@ -1,6 +1,7 @@
 // Package cortext is a pure-Go (no CGO) binding for the Cortext multimodal
-// memory engine. It loads a prebuilt shared library shipped under native/ for
-// the current GOOS/GOARCH (Zig cross-builds), or a path from CORTEXT_LIBRARY_PATH.
+// memory engine. Shared libraries and model shards come from the
+// augmem/cortext GitHub Release asset tarball (see EnsureAssets), or from
+// CORTEXT_LIBRARY_PATH / CORTEXT_ASSETS_DIR when set explicitly.
 package cortext
 
 import (
@@ -8,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"unsafe"
 )
@@ -87,15 +87,15 @@ func LastError() string {
 // New opens a Cortext instance at dbPath (file path or ":memory:").
 // cfg may be nil for all native defaults.
 //
-// If CORTEXT_AIST_MODEL_PATH is unset, New materializes the bundled AIST model
-// from Git-friendly chunks under models/ (hermes-plugin style), or falls back
-// to a sibling full .gguf path, then sets the env var for the create call.
+// The native library is loaded via EnsureAssets (augmem/cortext release
+// tarball). Release natives embed AIST and assemble it on first create.
+// Set CORTEXT_AIST_MODEL_PATH only to force a specific external GGUF file.
 func New(dbPath string, cfg *Config) (*Handle, error) {
 	if err := loadLibrary(); err != nil {
 		return nil, err
 	}
 
-	restore, err := ensureModelEnv(dbPath)
+	restore, err := ensureModelEnv()
 	if err != nil {
 		return nil, err
 	}
@@ -506,95 +506,23 @@ func decodeEmbeddingResult(payload []byte, err error) (EmbeddingResult, error) {
 	return out, nil
 }
 
-// ensureModelEnv sets CORTEXT_AIST_MODEL_PATH when unset if a model is found.
-// Returns a restore function that puts the previous env value back.
+// ensureModelEnv validates CORTEXT_AIST_MODEL_PATH when the caller set it.
+// Otherwise it leaves the env unset so the release native embeds/assembles AIST.
 //
-// On Windows the native CRT's getenv may not see os.Setenv alone, so we also
-// push the variable through the CRT putenv path (see setNativeEnv).
-func ensureModelEnv(dbPath string) (func(), error) {
+// On Windows the native CRT's getenv may not see os.Setenv alone, so an explicit
+// path is also pushed through the CRT putenv path (see setNativeEnv).
+func ensureModelEnv() (func(), error) {
 	const key = "CORTEXT_AIST_MODEL_PATH"
-	if prev := os.Getenv(key); prev != "" {
-		if st, err := os.Stat(prev); err == nil && !st.IsDir() {
-			return func() {}, nil
-		}
-		// Stale override: fall through and re-resolve.
-	}
-
-	path, err := resolveAISTModel(dbPath)
-	if err != nil {
-		return nil, err
-	}
+	path := os.Getenv(key)
 	if path == "" {
-		// Leave unset; native library may still resolve via relative models/.
 		return func() {}, nil
 	}
 	if st, err := os.Stat(path); err != nil || st.IsDir() {
-		return nil, fmt.Errorf("resolved AIST model path is missing: %s", path)
+		return nil, fmt.Errorf("CORTEXT_AIST_MODEL_PATH is missing or not a file: %s", path)
 	}
-
-	previous, hadPrevious := os.LookupEnv(key)
+	// Re-apply via CRT so Windows natives see the same value.
 	if err := setNativeEnv(key, path); err != nil {
 		return nil, err
 	}
-	return func() {
-		if hadPrevious {
-			_ = setNativeEnv(key, previous)
-			return
-		}
-		_ = unsetNativeEnv(key)
-	}, nil
-}
-
-// resolveAISTModel prefers bundled Git chunks, then a full local .gguf.
-func resolveAISTModel(dbPath string) (string, error) {
-	if chunksReady() {
-		return MaterializeModel(dbPath)
-	}
-	return findDefaultAISTModel(), nil
-}
-
-func chunksReady() bool {
-	manifestPath := filepath.Join(packageDir(), "models", "manifest.json")
-	if _, err := os.Stat(manifestPath); err != nil {
-		return false
-	}
-	// At least one declared part must exist on disk.
-	chunk0 := filepath.Join(packageDir(), "models", "AIST-87M-GGUF", "chunks", "AIST-87M_q8_0.gguf.part-000")
-	_, err := os.Stat(chunk0)
-	return err == nil
-}
-
-func findDefaultAISTModel() string {
-	candidates := []string{}
-	pkg := packageDir()
-	if pkg != "" {
-		candidates = append(candidates,
-			filepath.Join(pkg, "models", "AIST-87M-GGUF", "AIST-87M_q8_0.gguf"),
-			filepath.Join(pkg, "models", "AIST-87M-GGUF", "AIST-87M_q5_1.gguf"),
-		)
-		parent := filepath.Dir(pkg)
-		candidates = append(candidates,
-			filepath.Join(parent, "cortext", "models", "AIST-87M-GGUF", "AIST-87M_q8_0.gguf"),
-			filepath.Join(parent, "cortext", "models", "AIST-87M-GGUF", "AIST-87M_q5_1.gguf"),
-			filepath.Join(parent, "cortext", "bindings", "python", "augmem", "cortext", "models", "AIST-87M-GGUF", "AIST-87M_q8_0.gguf"),
-		)
-	}
-	// CWD-relative search roots used by the native library itself.
-	cwd, _ := os.Getwd()
-	if cwd != "" {
-		candidates = append(candidates,
-			filepath.Join(cwd, "models", "AIST-87M-GGUF", "AIST-87M_q8_0.gguf"),
-			filepath.Join(cwd, "models", "AIST-87M-GGUF", "AIST-87M_q5_1.gguf"),
-		)
-	}
-	for _, path := range candidates {
-		if st, err := os.Stat(path); err == nil && !st.IsDir() {
-			abs, err := filepath.Abs(path)
-			if err == nil {
-				return abs
-			}
-			return path
-		}
-	}
-	return ""
+	return func() {}, nil
 }

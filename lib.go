@@ -83,7 +83,7 @@ func loadLibrary() error {
 		path, err := resolveLibraryPath()
 		if err != nil {
 			libErr = fmt.Errorf(
-				"could not load Cortext shared library for %s: %w\nset CORTEXT_LIBRARY_PATH, CORTEXT_ASSETS_DIR, or allow download of github.com/augmem/cortext release assets v%s",
+				"could not load Cortext shared library for %s: %w\nset CORTEXT_LIBRARY_PATH, CORTEXT_ASSETS_DIR, or allow download of github.com/augmem/cortext.cpp release assets v%s",
 				platformTag(), err, assetsVersion(),
 			)
 			return

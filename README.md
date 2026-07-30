@@ -3,7 +3,7 @@
 Pure Go package for [Cortext](https://github.com/augmem/cortext) — no CGO required.
 
 Natives and AIST model shards are **not** in this module. On first use the package
-downloads the matching [augmem/cortext](https://github.com/augmem/cortext/releases)
+downloads the matching [augmem/cortext.cpp](https://github.com/augmem/cortext.cpp/releases)
 release asset, verifies its SHA-256, and unpacks it:
 
 ```text
@@ -93,4 +93,4 @@ git tag -a v1.2.4 -m "cortext.go v1.2.4"
 git push origin v1.2.4
 ```
 
-Bump `AssetsVersion` in `version.go` when pinning a new augmem/cortext assets line.
+Bump `AssetsVersion` in `version.go` when pinning a new augmem/cortext.cpp assets line.

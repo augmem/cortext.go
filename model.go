@@ -46,7 +46,7 @@ var (
 // Release natives embed AIST and assemble it inside the library on first create.
 // Call MaterializeModel only when an external filesystem GGUF is required.
 //
-// Chunks always come from EnsureAssets() (augmem/cortext release tarball).
+// Chunks always come from EnsureAssets() (augmem/cortext.cpp release tarball).
 //
 // Cache location (first match wins):
 //  1. CORTEXT_MODEL_CACHE_DIR

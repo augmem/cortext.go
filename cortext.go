@@ -1,6 +1,6 @@
 // Package cortext is a pure-Go (no CGO) binding for the Cortext multimodal
 // memory engine. Shared libraries and model shards come from the
-// augmem/cortext GitHub Release asset tarball (see EnsureAssets), or from
+// augmem/cortext.cpp GitHub Release asset tarball (see EnsureAssets), or from
 // CORTEXT_LIBRARY_PATH / CORTEXT_ASSETS_DIR when set explicitly.
 package cortext
 
@@ -87,7 +87,7 @@ func LastError() string {
 // New opens a Cortext instance at dbPath (file path or ":memory:").
 // cfg may be nil for all native defaults.
 //
-// The native library is loaded via EnsureAssets (augmem/cortext release
+// The native library is loaded via EnsureAssets (augmem/cortext.cpp release
 // tarball). Release natives embed AIST and assemble it on first create.
 // Set CORTEXT_AIST_MODEL_PATH only to force a specific external GGUF file.
 func New(dbPath string, cfg *Config) (*Handle, error) {

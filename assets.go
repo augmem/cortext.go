@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	defaultAssetsRepo   = "augmem/cortext"
+	defaultAssetsRepo   = "augmem/cortext.cpp"
 	assetsHTTPTimeout   = 10 * time.Minute
 	assetsMarkerName    = ".cortext-assets-ok"
 	releaseAssetNameTpl = "cortext-assets-%s.tar.gz"
@@ -28,7 +28,7 @@ var (
 )
 
 // EnsureAssets downloads (if needed) and unpacks the shared Cortext release
-// asset tarball from github.com/augmem/cortext, then returns the root that
+// asset tarball from github.com/augmem/cortext.cpp, then returns the root that
 // contains native/ and models/.
 //
 // Layout after unpack:

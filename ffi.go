@@ -46,24 +46,25 @@ const (
 
 // Registered C ABI entry points (purego, no CGO).
 var (
-	fnConfigInit              func(*nativeConfig)
-	fnCreateWithConfig        func(*nativeConfig, string) uintptr
-	fnFree                    func(uintptr)
-	fnProcessTextJSONOpts     func(uintptr, string, string, *nativeProcessOptions) uintptr
-	fnEmbedTextJSON           func(uintptr, string) uintptr
-	fnProcessAudioJSONOpts    func(uintptr, *float32, uintptr, string, *nativeProcessOptions) uintptr
-	fnProcessAudioMediaOpts   func(uintptr, *float32, uintptr, string, *nativeMedia, *nativeProcessOptions) uintptr
-	fnEmbedAudioJSON          func(uintptr, *float32, uintptr) uintptr
-	fnProcessImageJSONOpts    func(uintptr, *byte, int32, int32, int32, string, *nativeProcessOptions) uintptr
-	fnProcessImageMediaOpts   func(uintptr, *byte, int32, int32, int32, string, *nativeMedia, *nativeProcessOptions) uintptr
-	fnEmbedImageJSON          func(uintptr, *byte, int32, int32, int32) uintptr
-	fnConsolidateJSON         func(uintptr) uintptr
-	fnFlush                   func(uintptr) int32
-	fnReset                   func(uintptr) int32
-	fnVersion                 func() string
-	fnLastError               func() string
-	fnStringFree              func(uintptr)
-	fnProcessJSONOptionsInit  func(*nativeProcessOptions)
+	fnConfigInit             func(*nativeConfig)
+	fnCreateWithConfig       func(*nativeConfig, string) uintptr
+	fnFree                   func(uintptr)
+	fnProcessTextJSONOpts    func(uintptr, string, string, *nativeProcessOptions) uintptr
+	fnProcessTextMediaOpts   func(uintptr, string, string, *nativeMedia, *nativeProcessOptions) uintptr
+	fnEmbedTextJSON          func(uintptr, string) uintptr
+	fnProcessAudioJSONOpts   func(uintptr, *float32, uintptr, string, *nativeProcessOptions) uintptr
+	fnProcessAudioMediaOpts  func(uintptr, *float32, uintptr, string, *nativeMedia, *nativeProcessOptions) uintptr
+	fnEmbedAudioJSON         func(uintptr, *float32, uintptr) uintptr
+	fnProcessImageJSONOpts   func(uintptr, *byte, int32, int32, int32, string, *nativeProcessOptions) uintptr
+	fnProcessImageMediaOpts  func(uintptr, *byte, int32, int32, int32, string, *nativeMedia, *nativeProcessOptions) uintptr
+	fnEmbedImageJSON         func(uintptr, *byte, int32, int32, int32) uintptr
+	fnConsolidateJSON        func(uintptr) uintptr
+	fnFlush                  func(uintptr) int32
+	fnReset                  func(uintptr) int32
+	fnVersion                func() string
+	fnLastError              func() string
+	fnStringFree             func(uintptr)
+	fnProcessJSONOptionsInit func(*nativeProcessOptions)
 )
 
 func registerFuncs(handle uintptr) (err error) {
@@ -77,6 +78,7 @@ func registerFuncs(handle uintptr) (err error) {
 	purego.RegisterLibFunc(&fnCreateWithConfig, handle, "cortext_create_with_config")
 	purego.RegisterLibFunc(&fnFree, handle, "cortext_free")
 	purego.RegisterLibFunc(&fnProcessTextJSONOpts, handle, "cortext_process_text_json_with_options")
+	purego.RegisterLibFunc(&fnProcessTextMediaOpts, handle, "cortext_process_text_with_media_json_with_options")
 	purego.RegisterLibFunc(&fnEmbedTextJSON, handle, "cortext_embed_text_json")
 	purego.RegisterLibFunc(&fnProcessAudioJSONOpts, handle, "cortext_process_audio_json_with_options")
 	purego.RegisterLibFunc(&fnProcessAudioMediaOpts, handle, "cortext_process_audio_with_media_json_with_options")

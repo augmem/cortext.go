@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Text processing with arbitrary source media payloads and MIME types through
+  `ProcessTextWithMedia` and JSON/options variants.
+
+
 ## [1.2.4] - 2026-07-24
 
 ### Changed

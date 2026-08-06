@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 func TestPlatformTag(t *testing.T) {
@@ -84,6 +85,24 @@ func TestValidateImageBuffer(t *testing.T) {
 	}
 	if err := validateImageBuffer(nil, 0, 1, 3); err == nil {
 		t.Fatal("non-positive dimensions were accepted")
+	}
+}
+
+func TestMakeNativeMediaPreservesArbitraryBinaryAndMIME(t *testing.T) {
+	data := []byte{0x00, 0xff, 0x01, 0x7f}
+	native, keep := makeNativeMedia(&Media{Data: data, MimeType: "application/octet-stream"})
+	if keep == nil {
+		t.Fatal("media keep-alive was nil")
+	}
+	if native.Data == nil || native.Size != uintptr(len(data)) {
+		t.Fatalf("native media data = %p size %d, want non-nil size %d", native.Data, native.Size, len(data))
+	}
+	got := unsafe.Slice(native.Data, int(native.Size))
+	if string(got) != string(data) {
+		t.Fatalf("native media data = %x, want %x", got, data)
+	}
+	if native.MimeType == nil || goStringFromC(uintptr(unsafe.Pointer(native.MimeType))) != "application/octet-stream" {
+		t.Fatalf("native media MIME type was not preserved")
 	}
 }
 

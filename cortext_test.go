@@ -105,6 +105,7 @@ func TestMakeNativeMediaPreservesArbitraryBinaryAndMIME(t *testing.T) {
 	if native.MimeType == nil || goStringFromC(uintptr(unsafe.Pointer(native.MimeType))) != "application/octet-stream" {
 		t.Fatalf("native media MIME type was not preserved")
 	}
+	runtime.KeepAlive(keep)
 }
 
 func TestRegisterOptionalProcessTextMedia(t *testing.T) {

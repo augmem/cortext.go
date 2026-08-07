@@ -124,5 +124,7 @@ func ResetLibraryForTest() {
 	libHandle = 0
 	libErr = nil
 	libPath = ""
+	hasProcessTextMedia = false
+	fnProcessTextMediaOpts = nil
 	ResetAssetsForTest()
 }

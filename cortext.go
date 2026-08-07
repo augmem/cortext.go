@@ -197,6 +197,9 @@ func (h *Handle) ProcessTextWithMediaJSONWithOptions(text string, sourceID strin
 	if err := h.require(); err != nil {
 		return nil, err
 	}
+	if !hasProcessTextMedia {
+		return nil, errors.New("native library does not support text media processing")
+	}
 	nativeMedia, keep := makeNativeMedia(media)
 	nativeOptions := makeNativeProcessOptions(options)
 	raw := fnProcessTextMediaOpts(h.ptr, text, sourceID, &nativeMedia, &nativeOptions)

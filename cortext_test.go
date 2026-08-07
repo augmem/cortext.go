@@ -106,6 +106,43 @@ func TestMakeNativeMediaPreservesArbitraryBinaryAndMIME(t *testing.T) {
 	}
 }
 
+func TestRegisterOptionalProcessTextMedia(t *testing.T) {
+	previous := fnProcessTextMediaOpts
+	t.Cleanup(func() { fnProcessTextMediaOpts = previous })
+
+	if registerOptionalProcessTextMedia(func() { panic("missing symbol") }) {
+		t.Fatal("missing optional symbol was reported as available")
+	}
+	if fnProcessTextMediaOpts != nil {
+		t.Fatal("missing optional symbol left a callable function")
+	}
+
+	fn := func(uintptr, string, string, *nativeMedia, *nativeProcessOptions) uintptr { return 0 }
+	if !registerOptionalProcessTextMedia(func() { fnProcessTextMediaOpts = fn }) {
+		t.Fatal("available optional symbol was reported as unavailable")
+	}
+	if fnProcessTextMediaOpts == nil {
+		t.Fatal("available optional symbol did not register")
+	}
+}
+
+func TestProcessTextWithMediaReportsUnsupportedNative(t *testing.T) {
+	previousCapability := hasProcessTextMedia
+	previousFn := fnProcessTextMediaOpts
+	t.Cleanup(func() {
+		hasProcessTextMedia = previousCapability
+		fnProcessTextMediaOpts = previousFn
+	})
+	hasProcessTextMedia = false
+	fnProcessTextMediaOpts = nil
+
+	h := &Handle{ptr: 1}
+	_, err := h.ProcessTextWithMedia("text", "source", nil)
+	if err == nil || err.Error() != "native library does not support text media processing" {
+		t.Fatalf("ProcessTextWithMedia error = %v, want unsupported error", err)
+	}
+}
+
 func TestConfigFieldsDistinguishOmittedAndExplicitZero(t *testing.T) {
 	cfg := Config{Focus: Ptr(0.0), AffectInterrupt: Ptr(false)}
 	if cfg.Focus == nil || *cfg.Focus != 0.0 {

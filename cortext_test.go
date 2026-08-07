@@ -54,6 +54,7 @@ func TestLoadLibraryAndVersion(t *testing.T) {
 		t.Skip("skipping network asset download in short mode")
 	}
 	ResetLibraryForTest()
+	defer ResetLibraryForTest()
 	t.Setenv("CORTEXT_ASSETS_DIR", "")
 	t.Setenv("CORTEXT_LIBRARY_PATH", "")
 	cache := t.TempDir()
@@ -199,6 +200,7 @@ func TestNewProcessEmbed(t *testing.T) {
 		t.Skip("skipping network asset download in short mode")
 	}
 	ResetLibraryForTest()
+	defer ResetLibraryForTest()
 	t.Setenv("CORTEXT_ASSETS_DIR", "")
 	t.Setenv("CORTEXT_LIBRARY_PATH", "")
 	t.Setenv("CORTEXT_AIST_MODEL_PATH", "")

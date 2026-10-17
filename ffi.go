@@ -17,7 +17,6 @@ type nativeConfig struct {
 	AffectInterrupt          int32
 	AffectRetrieval          int32
 	ReinforcementEnabled     int32
-	ProceduralEnabled        int32
 	SequentialEdgesEnabled   int32
 	SignalFilterAudioEnabled int32
 	SignalFilterImageEnabled int32

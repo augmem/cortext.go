@@ -21,7 +21,6 @@ type Config struct {
 	AffectInterrupt        *bool
 	AffectRetrieval        *bool
 	ReinforcementEnabled   *bool
-	ProceduralEnabled      *bool
 	SequentialEdgesEnabled *bool
 	SignalFilterAudio      *bool
 	SignalFilterImage      *bool
@@ -123,9 +122,6 @@ func New(dbPath string, cfg *Config) (*Handle, error) {
 		}
 		if cfg.ReinforcementEnabled != nil {
 			nativeCfg.ReinforcementEnabled = boolToCInt(*cfg.ReinforcementEnabled)
-		}
-		if cfg.ProceduralEnabled != nil {
-			nativeCfg.ProceduralEnabled = boolToCInt(*cfg.ProceduralEnabled)
 		}
 		if cfg.SequentialEdgesEnabled != nil {
 			nativeCfg.SequentialEdgesEnabled = boolToCInt(*cfg.SequentialEdgesEnabled)

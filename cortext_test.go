@@ -1,12 +1,15 @@
 package cortext
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -183,6 +186,71 @@ func TestNewProcessEmbed(t *testing.T) {
 	}
 	if err := engine.Reset(); err != nil {
 		t.Fatalf("Reset: %v", err)
+	}
+}
+
+func TestMixedMemoryContentMimetypes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping native engine test in short mode")
+	}
+	ResetLibraryForTest()
+	if err := LoadLibrary(); err != nil {
+		t.Fatalf("LoadLibrary: %v", err)
+	}
+	engine, err := New(filepath.Join(t.TempDir(), "mixed.db"), nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer engine.Close()
+
+	// One turn = one source: a text signal and its photo, as peers.
+	photo := []byte{0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9}
+	if _, err := engine.ProcessTextWithOptions("The parking garage ticket says level 4 spot 27.",
+		"chat/user/turn1", &ProcessOptions{Retention: RetentionNatural}); err != nil {
+		t.Fatalf("ProcessText: %v", err)
+	}
+	pixels := bytes.Repeat([]byte{128}, 8*8*3)
+	if _, err := engine.ProcessImageWithMediaAndOptions(pixels, 8, 8, 3, "chat/user/turn1",
+		&Media{Data: photo, MimeType: "image/jpeg"}, &ProcessOptions{Retention: RetentionDurable}); err != nil {
+		t.Fatalf("ProcessImageWithMedia: %v", err)
+	}
+	ctx, err := engine.ProcessTextWithOptions("parking garage level spot", "query/public",
+		&ProcessOptions{Retention: RetentionEphemeral})
+	if err != nil {
+		t.Fatalf("ProcessText query: %v", err)
+	}
+
+	var memories []any
+	for _, key := range []string{"retrieved_memory", "working_memory"} {
+		list, _ := ctx[key].([]any)
+		memories = append(memories, list...)
+	}
+	mixed := 0
+	for _, raw := range memories {
+		memory, _ := raw.(map[string]any)
+		if memory["modality"] != "mixed" {
+			continue
+		}
+		mixed++
+		var mimes []string
+		for _, c := range memory["content"].([]any) {
+			content := c.(map[string]any)
+			mime, _ := content["mimetype"].(string)
+			mimes = append(mimes, mime)
+			if mime == "image/jpeg" {
+				got, err := base64.StdEncoding.DecodeString(content["base64"].(string))
+				if err != nil || !bytes.Equal(got, photo) {
+					t.Fatalf("image payload = %v, %v; want %v", got, err, photo)
+				}
+			}
+		}
+		sort.Strings(mimes)
+		if strings.Join(mimes, ",") != "image/jpeg,text/plain" {
+			t.Fatalf("content mimetypes = %v", mimes)
+		}
+	}
+	if mixed == 0 {
+		t.Fatal("no mixed memory recalled")
 	}
 }
 

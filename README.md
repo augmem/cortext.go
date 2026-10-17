@@ -51,6 +51,11 @@ func main() {
 }
 ```
 
+Each memory in `retrieved_memory` / `working_memory` carries `content`: every
+signal payload of the memory as `{size_bytes, mimetype, base64}`, in signal
+order. `modality` is the modality its signals share, or `"mixed"` when they
+differ (for example a turn's text and the photo sent with it under one source).
+
 ## Assets
 
 | Env | Purpose |

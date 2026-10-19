@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ProcessOptions.EvidenceBudgetBytes` and the `evidence_budget_bytes` field of
+  the native `cortext_process_json_options` struct: a per-call evidence budget
+  (zero returns recalled memories whole). Requires an engine with the field.
+- README: query contexts lead with `standing_memory`, ahead of
+  `retrieved_memory`.
+
 ## [1.2.4] - 2026-07-24
 
 ### Changed

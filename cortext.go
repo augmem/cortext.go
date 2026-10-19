@@ -63,6 +63,15 @@ type ProcessOptions struct {
 	OmitEmbedding bool
 	// Retention is Natural when zero-value / omitted.
 	Retention Retention
+	// EvidenceBudgetBytes is the evidence budget for the returned packet, in
+	// bytes. Zero (omitted) returns recalled memories whole. A positive value
+	// fits standing_memory plus retrieved_memory (with attached neighbours)
+	// within it, text counted by its UTF-8 bytes and other payloads as 480
+	// bytes each; grouped memories keep their members most similar to the
+	// query, and more distinct memories are kept trimmed before lower-ranked
+	// ones are left out. Convert a token budget with the reader's tokenizer
+	// rate (8,000 tokens at 4.35 chars/token is 34,800).
+	EvidenceBudgetBytes uint64
 }
 
 // Version returns the native library version string.
@@ -452,6 +461,7 @@ func makeNativeProcessOptions(options *ProcessOptions) nativeProcessOptions {
 		if options.Retention != 0 {
 			native.Retention = nativeRetention(options.Retention)
 		}
+		native.EvidenceBudgetBytes = uintptr(options.EvidenceBudgetBytes)
 	}
 	return native
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 func TestPlatformTag(t *testing.T) {
@@ -251,6 +253,89 @@ func TestMixedMemoryContentMimetypes(t *testing.T) {
 	}
 	if mixed == 0 {
 		t.Fatal("no mixed memory recalled")
+	}
+}
+
+func TestProcessOptionsCarryTheEvidenceBudget(t *testing.T) {
+	ResetLibraryForTest()
+	if err := LoadLibrary(); err != nil {
+		t.Skipf("LoadLibrary: %v", err)
+	}
+	if got := makeNativeProcessOptions(nil).EvidenceBudgetBytes; got != 0 {
+		t.Fatalf("unset budget = %d, want 0", got)
+	}
+	native := makeNativeProcessOptions(&ProcessOptions{Retention: RetentionEphemeral, EvidenceBudgetBytes: 34_800})
+	if native.EvidenceBudgetBytes != 34_800 || native.Retention != retentionEphemeralC {
+		t.Fatalf("native options = %+v", native)
+	}
+	if native.StructSize != unsafe.Sizeof(native) {
+		t.Fatalf("struct size = %d, want %d", native.StructSize, unsafe.Sizeof(native))
+	}
+}
+
+func TestEvidenceBudgetBoundsStandingAndRetrieved(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping native engine test in short mode")
+	}
+	ResetLibraryForTest()
+	if err := LoadLibrary(); err != nil {
+		t.Fatalf("LoadLibrary: %v", err)
+	}
+	engine, err := New(filepath.Join(t.TempDir(), "budget.db"), nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer engine.Close()
+	durable := &ProcessOptions{Retention: RetentionDurable}
+	if _, err := engine.ProcessTextWithOptions("Always answer with the departure pier.", "chat/rules", durable); err != nil {
+		t.Fatalf("ProcessText: %v", err)
+	}
+	for i := 0; i < 6; i++ {
+		text := fmt.Sprintf("The ferry to the island leaves at %d from pier four.", 6+i)
+		if _, err := engine.ProcessTextWithOptions(text, fmt.Sprintf("chat/ferry/%d", i), durable); err != nil {
+			t.Fatalf("ProcessText: %v", err)
+		}
+	}
+	evidence := func(ctx map[string]any) (bytes uint64, retrieved int) {
+		for _, key := range []string{"standing_memory", "retrieved_memory"} {
+			list, ok := ctx[key].([]any)
+			if !ok {
+				t.Fatalf("context has no %s array", key)
+			}
+			if key == "retrieved_memory" {
+				retrieved = len(list)
+			}
+			for _, raw := range list {
+				for _, c := range raw.(map[string]any)["content"].([]any) {
+					content := c.(map[string]any)
+					if strings.HasPrefix(content["mimetype"].(string), "text/") {
+						bytes += uint64(content["size_bytes"].(float64))
+					} else {
+						bytes += 480
+					}
+				}
+			}
+		}
+		return bytes, retrieved
+	}
+	query := "When does the ferry leave?"
+	whole, err := engine.ProcessTextWithOptions(query, "query/public", &ProcessOptions{Retention: RetentionEphemeral})
+	if err != nil {
+		t.Fatalf("ProcessText query: %v", err)
+	}
+	wholeBytes, wholeCount := evidence(whole)
+	if wholeCount < 2 {
+		t.Fatalf("whole packet retrieved %d memories", wholeCount)
+	}
+	budget := wholeBytes / 2
+	budgeted, err := engine.ProcessTextWithOptions(query, "query/public",
+		&ProcessOptions{Retention: RetentionEphemeral, EvidenceBudgetBytes: budget})
+	if err != nil {
+		t.Fatalf("ProcessText budgeted query: %v", err)
+	}
+	gotBytes, gotCount := evidence(budgeted)
+	if gotBytes > budget || gotCount >= wholeCount {
+		t.Fatalf("budgeted packet %d bytes / %d memories; budget %d, whole %d memories", gotBytes, gotCount, budget, wholeCount)
 	}
 }
 

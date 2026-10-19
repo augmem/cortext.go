@@ -34,6 +34,8 @@ type nativeProcessOptions struct {
 	IncludeEmbedding int32
 	Retention        int32
 	Reserved         int32
+	// EvidenceBudgetBytes: 0 = unset (whole memories).
+	EvidenceBudgetBytes uintptr
 }
 
 const (

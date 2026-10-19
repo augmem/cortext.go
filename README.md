@@ -51,7 +51,21 @@ func main() {
 }
 ```
 
-Each memory in `retrieved_memory` / `working_memory` carries `content`: every
+A query context leads with `standing_memory` (standing directives such as
+"Always ...", outside the retrieved ranking; show it ahead of
+`retrieved_memory` and do not count it against a cut of the retrieved list),
+then `retrieved_memory`. `ProcessOptions.EvidenceBudgetBytes` (zero = whole
+memories) fits both within a byte budget: text counts its UTF-8 bytes, other
+payloads 480 bytes each, grouped memories keep their members most similar to
+the query, and more distinct memories are kept trimmed before lower-ranked
+ones are left out (8,000 tokens at 4.35 chars/token is 34,800 bytes).
+
+```go
+ctx, err := engine.ProcessTextWithOptions("When is the marathon long run?", "query/main",
+	&cortext.ProcessOptions{Retention: cortext.RetentionEphemeral, EvidenceBudgetBytes: 34_800})
+```
+
+Each memory in `standing_memory` / `retrieved_memory` / `working_memory` carries `content`: every
 signal payload of the memory as `{size_bytes, mimetype, base64}`, in signal
 order. `modality` is the modality its signals share, or `"mixed"` when they
 differ (for example a turn's text and the photo sent with it under one source).

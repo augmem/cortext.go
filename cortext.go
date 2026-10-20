@@ -129,6 +129,10 @@ func New(dbPath string, cfg *Config) (*Handle, error) {
 	}
 	defer restore()
 
+	if err := checkConfigForNative(cfg, nativeIsEngineV5()); err != nil {
+		return nil, err
+	}
+
 	var nativeCfg nativeConfig
 	nativeCfg.StructSize = unsafe.Sizeof(nativeCfg)
 	fnConfigInit(&nativeCfg)
@@ -522,13 +526,42 @@ func makeNativeMedia(media *Media) (nativeMedia, *keepAliveMedia) {
 	return native, keep
 }
 
+// Layouts of cortext_process_json_options, newest first: reference time
+// (engine v5 + #31), evidence budget (engine v5), retention (pre-v5 releases).
+var nativeProcessOptionsLayouts = []uintptr{
+	unsafe.Sizeof(nativeProcessOptions{}),
+	unsafe.Offsetof(nativeProcessOptions{}.HasReferenceMs),
+	unsafe.Offsetof(nativeProcessOptions{}.EvidenceBudgetBytes),
+}
+
+// initNativeProcessOptions returns options initialised by the engine in the
+// newest layout it accepts. Pre-v5 engines only accept their exact struct
+// size and clip anything else to the include_embedding prefix, which would
+// silently drop retention, so each known layout is offered in turn.
+func initNativeProcessOptions() nativeProcessOptions {
+	var native nativeProcessOptions
+	for _, size := range nativeProcessOptionsLayouts {
+		native = nativeProcessOptions{StructSize: size}
+		fnProcessJSONOptionsInit(&native)
+		if native.StructSize == size {
+			return native
+		}
+	}
+	return native
+}
+
+// nativeIsEngineV5 reports whether the loaded engine reads the evidence-budget
+// options layout, which arrived in engine v5 after procedural_enabled left
+// cortext_config.
+func nativeIsEngineV5() bool {
+	return initNativeProcessOptions().StructSize >= unsafe.Offsetof(nativeProcessOptions{}.HasReferenceMs)
+}
+
 // makeNativeProcessOptions lays options out as cortext_process_json_options.
-// The engine's init clips StructSize to the layout it understands, so a field
-// the loaded engine cannot read is an error rather than silently ignored.
+// A field the loaded engine cannot read is an error rather than silently
+// ignored.
 func makeNativeProcessOptions(options *ProcessOptions) (nativeProcessOptions, error) {
-	native := nativeProcessOptions{}
-	native.StructSize = unsafe.Sizeof(native)
-	fnProcessJSONOptionsInit(&native)
+	native := initNativeProcessOptions()
 	if options == nil {
 		return native, nil
 	}
@@ -536,6 +569,9 @@ func makeNativeProcessOptions(options *ProcessOptions) (nativeProcessOptions, er
 		native.IncludeEmbedding = 0
 	}
 	if options.Retention != 0 {
+		if native.StructSize < unsafe.Offsetof(native.Reserved)+unsafe.Sizeof(native.Reserved) {
+			return native, errors.New("native library does not support process retention")
+		}
 		native.Retention = nativeRetention(options.Retention)
 	}
 	if options.EvidenceBudgetBytes != 0 {
@@ -560,6 +596,21 @@ func makeNativeProcessOptions(options *ProcessOptions) (nativeProcessOptions, er
 		native.ReferenceMs = uint64(ms)
 	}
 	return native, nil
+}
+
+// checkConfigForNative rejects Config fields that a pre-v5 engine would read
+// from the wrong slot: its cortext_config still has procedural_enabled after
+// reinforcement_enabled, at the same struct size, so every later field is
+// shifted by one.
+func checkConfigForNative(cfg *Config, engineV5 bool) error {
+	if cfg == nil || engineV5 {
+		return nil
+	}
+	if cfg.SequentialEdgesEnabled != nil || cfg.SignalFilterAudio != nil ||
+		cfg.SignalFilterImage != nil || cfg.SignalFilterText != nil {
+		return errors.New("native library predates engine v5: Config.SequentialEdgesEnabled and Config.SignalFilter* need an engine v5 native")
+	}
+	return nil
 }
 
 func nativeRetention(retention Retention) int32 {

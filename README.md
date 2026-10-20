@@ -31,7 +31,6 @@ import (
 )
 
 func main() {
-	jpegBytes := []byte{0xff, 0xd8, 0xff, 0xd9}
 	engine, err := cortext.New(":memory:", nil)
 	if err != nil {
 		panic(err)
@@ -43,17 +42,6 @@ func main() {
 		panic(err)
 	}
 	fmt.Println(ctx["should_interrupt"])
-
-	// Store a caller payload (here a photo) in place of the text; the text is
-	// still what the signal is encoded from.
-	withMedia, err := engine.ProcessTextWithMedia(
-		"A photo of the parking ticket.", "chat/main",
-		&cortext.Media{Data: jpegBytes, MimeType: "image/jpeg"},
-	)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println(withMedia["should_interrupt"])
 
 	embedding, err := engine.EmbedText("embed without storing")
 	if err != nil {
@@ -124,6 +112,18 @@ text but stores `Media.Data` as the signal's payload under `Media.MimeType`.
 Nil or empty media stores the text itself. A `text/*` payload is used as text
 (keyword index, standing memories, packet text); any other MIME type is an
 opaque payload. Natives without the text-media entry point return an error.
+
+```go
+withMedia, err := engine.ProcessTextWithMedia(
+	"A photo of the parking ticket.", "chat/main",
+	&cortext.Media{Data: jpegBytes, MimeType: "image/jpeg"},
+)
+```
+
+On a native older than engine v5, `New` rejects `Config.SequentialEdgesEnabled`
+and `Config.SignalFilter*` (that engine's `cortext_config` still carries
+`procedural_enabled`, which shifts those fields), and process options use the
+older layout so retention still applies.
 
 ## Assets
 

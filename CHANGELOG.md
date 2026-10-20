@@ -48,6 +48,12 @@ newer build.
 
 - Options the loaded native cannot read (an evidence budget or reference time
   on an older engine) return an error instead of being silently ignored.
+- Process options are offered to the native in each known layout, newest
+  first, so a pre-v5 native (which only keeps its exact struct size) still
+  reads retention.
+- On a pre-v5 native, `New` rejects `Config.SequentialEdgesEnabled` and
+  `Config.SignalFilter*`, which that engine would read one field off because
+  its `cortext_config` still carries `procedural_enabled`.
 
 ## [1.2.4] - 2026-07-24
 

@@ -23,12 +23,22 @@ func openLocalEngine(t *testing.T, name string) *Handle {
 	if err := LoadLibrary(); err != nil {
 		t.Fatalf("LoadLibrary: %v", err)
 	}
+	requireEngineV5(t)
 	engine, err := New(filepath.Join(t.TempDir(), name), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	t.Cleanup(engine.Close)
 	return engine
+}
+
+// requireEngineV5 skips when the loaded native predates the reference-time
+// options layout (for example the pinned release assets).
+func requireEngineV5(t *testing.T) {
+	t.Helper()
+	if initNativeProcessOptions().StructSize < unsafe.Sizeof(nativeProcessOptions{}) {
+		t.Skipf("native %s %s predates engine v5 reference time", LibraryPath(), Version())
+	}
 }
 
 type packetContent struct {
@@ -93,6 +103,9 @@ func recalls(t *testing.T, memories []map[string]any, needle string) bool {
 }
 
 func TestNativeProcessOptionsLayoutMatchesCAPI(t *testing.T) {
+	if unsafe.Sizeof(uintptr(0)) != 8 {
+		t.Skip("offsets below are the 64-bit C layout")
+	}
 	var native nativeProcessOptions
 	cases := []struct {
 		name string
@@ -118,6 +131,7 @@ func TestProcessOptionsCarryTheReferenceTime(t *testing.T) {
 	if err := LoadLibrary(); err != nil {
 		t.Skipf("LoadLibrary: %v", err)
 	}
+	requireEngineV5(t)
 	unset, err := makeNativeProcessOptions(&ProcessOptions{Retention: RetentionEphemeral})
 	if err != nil {
 		t.Fatalf("unset reference: %v", err)
@@ -176,6 +190,57 @@ func TestProcessOptionsRejectFieldsTheNativeLacks(t *testing.T) {
 	_, err = makeNativeProcessOptions(&ProcessOptions{EvidenceBudgetBytes: 100})
 	if err == nil || !strings.Contains(err.Error(), "evidence budget") {
 		t.Fatalf("budget on an older engine: err = %v", err)
+	}
+}
+
+func TestProcessOptionsFallBackToTheLegacyRetentionLayout(t *testing.T) {
+	previous := fnProcessJSONOptionsInit
+	t.Cleanup(func() { fnProcessJSONOptionsInit = previous })
+	// Released pre-v5 engines keep struct_size only when it equals their own
+	// 24-byte layout and clip anything else to the include_embedding prefix.
+	legacy := unsafe.Offsetof(nativeProcessOptions{}.EvidenceBudgetBytes)
+	fnProcessJSONOptionsInit = func(o *nativeProcessOptions) {
+		if o.StructSize != legacy {
+			o.StructSize = unsafe.Offsetof(o.Retention)
+		}
+		o.IncludeEmbedding = 1
+	}
+	native, err := makeNativeProcessOptions(&ProcessOptions{Retention: RetentionEphemeral})
+	if err != nil {
+		t.Fatalf("retention on a pre-v5 engine: %v", err)
+	}
+	if native.StructSize != legacy || native.Retention != retentionEphemeralC {
+		t.Fatalf("native options = %+v, want struct_size %d with Ephemeral retention", native, legacy)
+	}
+	if nativeIsEngineV5() {
+		t.Fatal("a 24-byte options engine was reported as engine v5")
+	}
+
+	fnProcessJSONOptionsInit = func(o *nativeProcessOptions) {
+		o.StructSize = unsafe.Offsetof(o.Retention)
+		o.IncludeEmbedding = 1
+	}
+	if _, err := makeNativeProcessOptions(&ProcessOptions{Retention: RetentionDurable}); err == nil {
+		t.Fatal("retention on an engine without the retention field was accepted")
+	}
+}
+
+func TestConfigRejectsShiftedFieldsOnPreV5Engines(t *testing.T) {
+	if err := checkConfigForNative(&Config{Focus: Ptr(0.3), ReinforcementEnabled: Ptr(false)}, false); err != nil {
+		t.Fatalf("fields laid out alike in both engines rejected: %v", err)
+	}
+	for name, cfg := range map[string]*Config{
+		"SequentialEdgesEnabled": {SequentialEdgesEnabled: Ptr(false)},
+		"SignalFilterAudio":      {SignalFilterAudio: Ptr(false)},
+		"SignalFilterImage":      {SignalFilterImage: Ptr(false)},
+		"SignalFilterText":       {SignalFilterText: Ptr(false)},
+	} {
+		if err := checkConfigForNative(cfg, false); err == nil {
+			t.Errorf("%s accepted on a pre-v5 engine", name)
+		}
+		if err := checkConfigForNative(cfg, true); err != nil {
+			t.Errorf("%s rejected on engine v5: %v", name, err)
+		}
 	}
 }
 

@@ -216,6 +216,12 @@ func TestNewProcessEmbed(t *testing.T) {
 		t.Fatalf("LoadLibrary: %v", err)
 	}
 	t.Logf("using library %s version %s", LibraryPath(), Version())
+	if n := initNativeProcessOptions(); n.StructSize < unsafe.Offsetof(n.Reserved)+unsafe.Sizeof(n.Reserved) {
+		t.Fatalf("options layout %d bytes drops retention on %s", n.StructSize, Version())
+	}
+	if _, err := New(":memory:", &Config{SignalFilterText: Ptr(false)}); !nativeIsEngineV5() && err == nil {
+		t.Fatal("pre-v5 native accepted a shifted Config field")
+	}
 
 	engine, err := New(":memory:", nil)
 	if err != nil {
@@ -223,7 +229,8 @@ func TestNewProcessEmbed(t *testing.T) {
 	}
 	defer engine.Close()
 
-	ctx, err := engine.ProcessText("Bailey likes tennis balls.", "chat/main")
+	ctx, err := engine.ProcessTextWithOptions("Bailey likes tennis balls.", "chat/main",
+		&ProcessOptions{Retention: RetentionDurable})
 	if err != nil {
 		t.Fatalf("ProcessText: %v", err)
 	}
@@ -257,6 +264,7 @@ func TestMixedMemoryContentMimetypes(t *testing.T) {
 	if err := LoadLibrary(); err != nil {
 		t.Fatalf("LoadLibrary: %v", err)
 	}
+	requireEngineV5(t)
 	engine, err := New(filepath.Join(t.TempDir(), "mixed.db"), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -319,6 +327,7 @@ func TestProcessOptionsCarryTheEvidenceBudget(t *testing.T) {
 	if err := LoadLibrary(); err != nil {
 		t.Skipf("LoadLibrary: %v", err)
 	}
+	requireEngineV5(t)
 	unset, err := makeNativeProcessOptions(nil)
 	if err != nil || unset.EvidenceBudgetBytes != 0 {
 		t.Fatalf("unset budget = %d (%v), want 0", unset.EvidenceBudgetBytes, err)
@@ -343,6 +352,7 @@ func TestEvidenceBudgetBoundsStandingAndRetrieved(t *testing.T) {
 	if err := LoadLibrary(); err != nil {
 		t.Fatalf("LoadLibrary: %v", err)
 	}
+	requireEngineV5(t)
 	engine, err := New(filepath.Join(t.TempDir(), "budget.db"), nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)

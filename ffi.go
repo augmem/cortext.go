@@ -36,6 +36,11 @@ type nativeProcessOptions struct {
 	Reserved         int32
 	// EvidenceBudgetBytes: 0 = unset (whole memories).
 	EvidenceBudgetBytes uintptr
+	// HasReferenceMs, AsOf, ReferenceMs: per-call query reference time,
+	// read by the engine only when StructSize covers ReferenceMs.
+	HasReferenceMs int32
+	AsOf           int32
+	ReferenceMs    uint64
 }
 
 const (

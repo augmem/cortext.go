@@ -319,10 +319,14 @@ func TestProcessOptionsCarryTheEvidenceBudget(t *testing.T) {
 	if err := LoadLibrary(); err != nil {
 		t.Skipf("LoadLibrary: %v", err)
 	}
-	if got := makeNativeProcessOptions(nil).EvidenceBudgetBytes; got != 0 {
-		t.Fatalf("unset budget = %d, want 0", got)
+	unset, err := makeNativeProcessOptions(nil)
+	if err != nil || unset.EvidenceBudgetBytes != 0 {
+		t.Fatalf("unset budget = %d (%v), want 0", unset.EvidenceBudgetBytes, err)
 	}
-	native := makeNativeProcessOptions(&ProcessOptions{Retention: RetentionEphemeral, EvidenceBudgetBytes: 34_800})
+	native, err := makeNativeProcessOptions(&ProcessOptions{Retention: RetentionEphemeral, EvidenceBudgetBytes: 34_800})
+	if err != nil {
+		t.Fatalf("budget options: %v", err)
+	}
 	if native.EvidenceBudgetBytes != 34_800 || native.Retention != retentionEphemeralC {
 		t.Fatalf("native options = %+v", native)
 	}

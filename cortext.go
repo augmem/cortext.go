@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"time"
 	"unsafe"
 )
 
@@ -21,7 +22,6 @@ type Config struct {
 	AffectInterrupt        *bool
 	AffectRetrieval        *bool
 	ReinforcementEnabled   *bool
-	ProceduralEnabled      *bool
 	SequentialEdgesEnabled *bool
 	SignalFilterAudio      *bool
 	SignalFilterImage      *bool
@@ -42,7 +42,11 @@ type EmbeddingResult struct {
 	Dimension int       `json:"dimension"`
 }
 
-// Media is optional source media stored alongside audio/image processing.
+// Media is caller source media stored as the signal's payload in place of the
+// canonical input (text, PCM or pixels), which is still what the signal is
+// encoded from. Nil or empty Data stores the canonical input. MimeType is
+// required with Data; a text/* payload is used as text (keyword index,
+// standing memories, packet text), any other MIME type is opaque.
 type Media struct {
 	Data     []byte
 	MimeType string
@@ -64,6 +68,26 @@ type ProcessOptions struct {
 	OmitEmbedding bool
 	// Retention is Natural when zero-value / omitted.
 	Retention Retention
+	// EvidenceBudgetBytes is the evidence budget for the returned packet, in
+	// bytes. Zero (omitted) returns recalled memories whole. A positive value
+	// fits standing_memory plus retrieved_memory (with attached neighbours)
+	// within it, text counted by its UTF-8 bytes and other payloads as 480
+	// bytes each; grouped memories keep their members most similar to the
+	// query, and more distinct memories are kept trimmed before lower-ranked
+	// ones are left out. Convert a token budget with the reader's tokenizer
+	// rate (8,000 tokens at 4.35 chars/token is 34,800).
+	EvidenceBudgetBytes uint64
+	// ReferenceTime is the query reference time, read only by
+	// RetentionEphemeral calls. The zero value leaves retrieval unchanged. Set,
+	// the long-term memories nearest that time (past or future) join the
+	// retrieval candidates; nothing is dropped for being later unless AsOf is
+	// set. It is sent at millisecond precision and must not precede the Unix
+	// epoch.
+	ReferenceTime time.Time
+	// AsOf additionally hides memories that start after ReferenceTime (and
+	// later turns or restatements attached to retrieved ones). It requires a
+	// non-zero ReferenceTime.
+	AsOf bool
 }
 
 // Version returns the native library version string.
@@ -90,6 +114,10 @@ func LastError() string {
 // The native library is loaded via EnsureAssets (augmem/cortext.cpp release
 // tarball). Release natives embed AIST and assemble it on first create.
 // Set CORTEXT_AIST_MODEL_PATH only to force a specific external GGUF file.
+// Engines from v5 on also require the late-interaction reranker
+// (AIST-87M-LI.gguf) whenever AIST resolves: it is found through
+// CORTEXT_LI_MODEL_PATH, beside the AIST file, or linked into the library, and
+// New fails if none resolves.
 func New(dbPath string, cfg *Config) (*Handle, error) {
 	if err := loadLibrary(); err != nil {
 		return nil, err
@@ -100,6 +128,10 @@ func New(dbPath string, cfg *Config) (*Handle, error) {
 		return nil, err
 	}
 	defer restore()
+
+	if err := checkConfigForNative(cfg, nativeIsEngineV5()); err != nil {
+		return nil, err
+	}
 
 	var nativeCfg nativeConfig
 	nativeCfg.StructSize = unsafe.Sizeof(nativeCfg)
@@ -123,9 +155,6 @@ func New(dbPath string, cfg *Config) (*Handle, error) {
 		}
 		if cfg.ReinforcementEnabled != nil {
 			nativeCfg.ReinforcementEnabled = boolToCInt(*cfg.ReinforcementEnabled)
-		}
-		if cfg.ProceduralEnabled != nil {
-			nativeCfg.ProceduralEnabled = boolToCInt(*cfg.ProceduralEnabled)
 		}
 		if cfg.SequentialEdgesEnabled != nil {
 			nativeCfg.SequentialEdgesEnabled = boolToCInt(*cfg.SequentialEdgesEnabled)
@@ -171,7 +200,10 @@ func (h *Handle) ProcessTextJSONWithOptions(text string, sourceID string, option
 	if err := h.require(); err != nil {
 		return nil, err
 	}
-	nativeOptions := makeNativeProcessOptions(options)
+	nativeOptions, err := makeNativeProcessOptions(options)
+	if err != nil {
+		return nil, err
+	}
 	raw := fnProcessTextJSONOpts(h.ptr, text, sourceID, &nativeOptions)
 	runtime.KeepAlive(h)
 	return takeJSONString(raw)
@@ -183,6 +215,43 @@ func (h *Handle) ProcessText(text string, sourceID string) (map[string]any, erro
 
 func (h *Handle) ProcessTextWithOptions(text string, sourceID string, options *ProcessOptions) (map[string]any, error) {
 	return decodeJSONObject(h.ProcessTextJSONWithOptions(text, sourceID, options))
+}
+
+// ProcessTextWithMediaJSON processes text and stores media (see Media) as the
+// signal's payload in place of the text. Nil or empty media stores the text.
+func (h *Handle) ProcessTextWithMediaJSON(text string, sourceID string, media *Media) ([]byte, error) {
+	return h.ProcessTextWithMediaJSONWithOptions(text, sourceID, media, nil)
+}
+
+// ProcessTextWithMediaJSONWithOptions is ProcessTextWithMediaJSON with
+// ProcessOptions (embedding, retention, evidence budget, reference time).
+func (h *Handle) ProcessTextWithMediaJSONWithOptions(text string, sourceID string, media *Media, options *ProcessOptions) ([]byte, error) {
+	if err := h.require(); err != nil {
+		return nil, err
+	}
+	if !hasProcessTextMedia {
+		return nil, errors.New("native library does not support text media processing")
+	}
+	nativeMedia, keep := makeNativeMedia(media)
+	nativeOptions, err := makeNativeProcessOptions(options)
+	if err != nil {
+		return nil, err
+	}
+	raw := fnProcessTextMediaOpts(h.ptr, text, sourceID, &nativeMedia, &nativeOptions)
+	runtime.KeepAlive(keep)
+	runtime.KeepAlive(h)
+	return takeJSONString(raw)
+}
+
+// ProcessTextWithMedia is ProcessTextWithMediaJSON decoded into a map.
+func (h *Handle) ProcessTextWithMedia(text string, sourceID string, media *Media) (map[string]any, error) {
+	return decodeJSONObject(h.ProcessTextWithMediaJSON(text, sourceID, media))
+}
+
+// ProcessTextWithMediaAndOptions is ProcessTextWithMediaJSONWithOptions
+// decoded into a map.
+func (h *Handle) ProcessTextWithMediaAndOptions(text string, sourceID string, media *Media, options *ProcessOptions) (map[string]any, error) {
+	return decodeJSONObject(h.ProcessTextWithMediaJSONWithOptions(text, sourceID, media, options))
 }
 
 func (h *Handle) EmbedTextJSON(text string) ([]byte, error) {
@@ -210,7 +279,10 @@ func (h *Handle) ProcessAudioJSONWithOptions(pcm []float32, sourceID string, opt
 	if err := h.require(); err != nil {
 		return nil, err
 	}
-	nativeOptions := makeNativeProcessOptions(options)
+	nativeOptions, err := makeNativeProcessOptions(options)
+	if err != nil {
+		return nil, err
+	}
 	raw := fnProcessAudioJSONOpts(h.ptr, float32Ptr(pcm), uintptr(len(pcm)), sourceID, &nativeOptions)
 	runtime.KeepAlive(pcm)
 	runtime.KeepAlive(h)
@@ -226,7 +298,10 @@ func (h *Handle) ProcessAudioWithMediaJSONWithOptions(pcm []float32, sourceID st
 		return nil, err
 	}
 	nativeMedia, keep := makeNativeMedia(media)
-	nativeOptions := makeNativeProcessOptions(options)
+	nativeOptions, err := makeNativeProcessOptions(options)
+	if err != nil {
+		return nil, err
+	}
 	raw := fnProcessAudioMediaOpts(h.ptr, float32Ptr(pcm), uintptr(len(pcm)), sourceID, &nativeMedia, &nativeOptions)
 	runtime.KeepAlive(pcm)
 	runtime.KeepAlive(keep)
@@ -279,7 +354,10 @@ func (h *Handle) ProcessImageJSONWithOptions(data []byte, width int, height int,
 	if err := validateImageBuffer(data, width, height, channels); err != nil {
 		return nil, err
 	}
-	nativeOptions := makeNativeProcessOptions(options)
+	nativeOptions, err := makeNativeProcessOptions(options)
+	if err != nil {
+		return nil, err
+	}
 	raw := fnProcessImageJSONOpts(
 		h.ptr,
 		bytePtr(data),
@@ -306,7 +384,10 @@ func (h *Handle) ProcessImageWithMediaJSONWithOptions(data []byte, width int, he
 		return nil, err
 	}
 	nativeMedia, keep := makeNativeMedia(media)
-	nativeOptions := makeNativeProcessOptions(options)
+	nativeOptions, err := makeNativeProcessOptions(options)
+	if err != nil {
+		return nil, err
+	}
 	raw := fnProcessImageMediaOpts(
 		h.ptr,
 		bytePtr(data),
@@ -445,19 +526,91 @@ func makeNativeMedia(media *Media) (nativeMedia, *keepAliveMedia) {
 	return native, keep
 }
 
-func makeNativeProcessOptions(options *ProcessOptions) nativeProcessOptions {
-	native := nativeProcessOptions{}
-	native.StructSize = unsafe.Sizeof(native)
-	fnProcessJSONOptionsInit(&native)
-	if options != nil {
-		if options.OmitEmbedding {
-			native.IncludeEmbedding = 0
-		}
-		if options.Retention != 0 {
-			native.Retention = nativeRetention(options.Retention)
+// Layouts of cortext_process_json_options, newest first: reference time
+// (engine v5 + #31), evidence budget (engine v5), retention (pre-v5 releases).
+var nativeProcessOptionsLayouts = []uintptr{
+	unsafe.Sizeof(nativeProcessOptions{}),
+	unsafe.Offsetof(nativeProcessOptions{}.HasReferenceMs),
+	unsafe.Offsetof(nativeProcessOptions{}.EvidenceBudgetBytes),
+}
+
+// initNativeProcessOptions returns options initialised by the engine in the
+// newest layout it accepts. Pre-v5 engines only accept their exact struct
+// size and clip anything else to the include_embedding prefix, which would
+// silently drop retention, so each known layout is offered in turn.
+func initNativeProcessOptions() nativeProcessOptions {
+	var native nativeProcessOptions
+	for _, size := range nativeProcessOptionsLayouts {
+		native = nativeProcessOptions{StructSize: size}
+		fnProcessJSONOptionsInit(&native)
+		if native.StructSize == size {
+			return native
 		}
 	}
 	return native
+}
+
+// nativeIsEngineV5 reports whether the loaded engine reads the evidence-budget
+// options layout, which arrived in engine v5 after procedural_enabled left
+// cortext_config.
+func nativeIsEngineV5() bool {
+	return initNativeProcessOptions().StructSize >= unsafe.Offsetof(nativeProcessOptions{}.HasReferenceMs)
+}
+
+// makeNativeProcessOptions lays options out as cortext_process_json_options.
+// A field the loaded engine cannot read is an error rather than silently
+// ignored.
+func makeNativeProcessOptions(options *ProcessOptions) (nativeProcessOptions, error) {
+	native := initNativeProcessOptions()
+	if options == nil {
+		return native, nil
+	}
+	if options.OmitEmbedding {
+		native.IncludeEmbedding = 0
+	}
+	if options.Retention != 0 {
+		if native.StructSize < unsafe.Offsetof(native.Reserved)+unsafe.Sizeof(native.Reserved) {
+			return native, errors.New("native library does not support process retention")
+		}
+		native.Retention = nativeRetention(options.Retention)
+	}
+	if options.EvidenceBudgetBytes != 0 {
+		if native.StructSize < unsafe.Offsetof(native.EvidenceBudgetBytes)+unsafe.Sizeof(native.EvidenceBudgetBytes) {
+			return native, errors.New("native library does not support the evidence budget")
+		}
+		native.EvidenceBudgetBytes = uintptr(options.EvidenceBudgetBytes)
+	}
+	if options.AsOf && options.ReferenceTime.IsZero() {
+		return native, errors.New("ProcessOptions.AsOf requires a ReferenceTime")
+	}
+	if !options.ReferenceTime.IsZero() {
+		ms := options.ReferenceTime.UnixMilli()
+		if ms < 0 {
+			return native, fmt.Errorf("ProcessOptions.ReferenceTime %s precedes the Unix epoch", options.ReferenceTime)
+		}
+		if native.StructSize < unsafe.Offsetof(native.ReferenceMs)+unsafe.Sizeof(native.ReferenceMs) {
+			return native, errors.New("native library does not support the query reference time")
+		}
+		native.HasReferenceMs = 1
+		native.AsOf = boolToCInt(options.AsOf)
+		native.ReferenceMs = uint64(ms)
+	}
+	return native, nil
+}
+
+// checkConfigForNative rejects Config fields that a pre-v5 engine would read
+// from the wrong slot: its cortext_config still has procedural_enabled after
+// reinforcement_enabled, at the same struct size, so every later field is
+// shifted by one.
+func checkConfigForNative(cfg *Config, engineV5 bool) error {
+	if cfg == nil || engineV5 {
+		return nil
+	}
+	if cfg.SequentialEdgesEnabled != nil || cfg.SignalFilterAudio != nil ||
+		cfg.SignalFilterImage != nil || cfg.SignalFilterText != nil {
+		return errors.New("native library predates engine v5: Config.SequentialEdgesEnabled and Config.SignalFilter* need an engine v5 native")
+	}
+	return nil
 }
 
 func nativeRetention(retention Retention) int32 {
@@ -506,23 +659,26 @@ func decodeEmbeddingResult(payload []byte, err error) (EmbeddingResult, error) {
 	return out, nil
 }
 
-// ensureModelEnv validates CORTEXT_AIST_MODEL_PATH when the caller set it.
-// Otherwise it leaves the env unset so the release native embeds/assembles AIST.
+// ensureModelEnv validates CORTEXT_AIST_MODEL_PATH and CORTEXT_LI_MODEL_PATH
+// when the caller set them. Otherwise it leaves the env unset so the release
+// native embeds/assembles AIST and finds the late-interaction reranker beside
+// it (or linked into the library).
 //
 // On Windows the native CRT's getenv may not see os.Setenv alone, so an explicit
 // path is also pushed through the CRT putenv path (see setNativeEnv).
 func ensureModelEnv() (func(), error) {
-	const key = "CORTEXT_AIST_MODEL_PATH"
-	path := os.Getenv(key)
-	if path == "" {
-		return func() {}, nil
-	}
-	if st, err := os.Stat(path); err != nil || st.IsDir() {
-		return nil, fmt.Errorf("CORTEXT_AIST_MODEL_PATH is missing or not a file: %s", path)
-	}
-	// Re-apply via CRT so Windows natives see the same value.
-	if err := setNativeEnv(key, path); err != nil {
-		return nil, err
+	for _, key := range []string{"CORTEXT_AIST_MODEL_PATH", "CORTEXT_LI_MODEL_PATH"} {
+		path := os.Getenv(key)
+		if path == "" {
+			continue
+		}
+		if st, err := os.Stat(path); err != nil || st.IsDir() {
+			return nil, fmt.Errorf("%s is missing or not a file: %s", key, path)
+		}
+		// Re-apply via CRT so Windows natives see the same value.
+		if err := setNativeEnv(key, path); err != nil {
+			return nil, err
+		}
 	}
 	return func() {}, nil
 }

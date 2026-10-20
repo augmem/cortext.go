@@ -1,4 +1,4 @@
-module github.com/augmem/cortext.go
+module github.com/augmem/cortext.go/v2
 
 go 1.22
 

@@ -9,7 +9,7 @@ before:
   hooks:
     - go mod tidy
     # Integration tests download release assets; keep a bound so hooks cannot hang.
-    - env CGO_ENABLED=0 go test ./... -count=1 -timeout 20m
+    - env CGO_ENABLED=0 CORTEXT_REQUIRE_ENGINE_V5=1 go test ./... -count=1 -timeout 20m
 
 builds:
   - skip: true
@@ -51,19 +51,19 @@ release:
   prerelease: auto
   mode: replace
   header: |
-    Pure-Go Cortext bindings (`CGO_ENABLED=0`) with Zig-built shared libraries
-    and a Git-chunked AIST model.
+    Pure-Go Cortext bindings (`CGO_ENABLED=0`) for the Cortext engine.
 
     ```bash
-    go get github.com/augmem/cortext.go@v{{ .Version }}
+    go get github.com/augmem/cortext.go/v2@v{{ .Version }}
     ```
 
-    The module ships platform natives under `native/` and model shards under
-    `models/`. First `New` reassembles the model into a local cache.
+    Natives and model shards come from the matching augmem/cortext.cpp release
+    assets (`cortext-assets-<version>.tar.gz`), downloaded and checksummed on
+    first use.
   footer: |
     Bundled Cortext C ABI version is reported by `cortext.Version()`.
 
-    Full module docs: https://pkg.go.dev/github.com/augmem/cortext.go@v{{ .Version }}
+    Full module docs: https://pkg.go.dev/github.com/augmem/cortext.go/v2@v{{ .Version }}
 
 snapshot:
   version_template: "{{ incpatch .Version }}-next"

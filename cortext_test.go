@@ -1,14 +1,19 @@
 package cortext
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 func TestPlatformTag(t *testing.T) {
@@ -53,6 +58,7 @@ func TestLoadLibraryAndVersion(t *testing.T) {
 		t.Skip("skipping network asset download in short mode")
 	}
 	ResetLibraryForTest()
+	defer ResetLibraryForTest()
 	t.Setenv("CORTEXT_ASSETS_DIR", "")
 	t.Setenv("CORTEXT_LIBRARY_PATH", "")
 	cache := t.TempDir()
@@ -84,6 +90,62 @@ func TestValidateImageBuffer(t *testing.T) {
 	}
 	if err := validateImageBuffer(nil, 0, 1, 3); err == nil {
 		t.Fatal("non-positive dimensions were accepted")
+	}
+}
+
+func TestMakeNativeMediaPreservesArbitraryBinaryAndMIME(t *testing.T) {
+	data := []byte{0x00, 0xff, 0x01, 0x7f}
+	native, keep := makeNativeMedia(&Media{Data: data, MimeType: "application/octet-stream"})
+	if keep == nil {
+		t.Fatal("media keep-alive was nil")
+	}
+	if native.Data == nil || native.Size != uintptr(len(data)) {
+		t.Fatalf("native media data = %p size %d, want non-nil size %d", native.Data, native.Size, len(data))
+	}
+	got := unsafe.Slice(native.Data, int(native.Size))
+	if string(got) != string(data) {
+		t.Fatalf("native media data = %x, want %x", got, data)
+	}
+	if native.MimeType == nil || goStringFromC(uintptr(unsafe.Pointer(native.MimeType))) != "application/octet-stream" {
+		t.Fatalf("native media MIME type was not preserved")
+	}
+	runtime.KeepAlive(keep)
+}
+
+func TestRegisterOptionalProcessTextMedia(t *testing.T) {
+	previous := fnProcessTextMediaOpts
+	t.Cleanup(func() { fnProcessTextMediaOpts = previous })
+
+	if registerOptionalProcessTextMedia(func() { panic("missing symbol") }) {
+		t.Fatal("missing optional symbol was reported as available")
+	}
+	if fnProcessTextMediaOpts != nil {
+		t.Fatal("missing optional symbol left a callable function")
+	}
+
+	fn := func(uintptr, string, string, *nativeMedia, *nativeProcessOptions) uintptr { return 0 }
+	if !registerOptionalProcessTextMedia(func() { fnProcessTextMediaOpts = fn }) {
+		t.Fatal("available optional symbol was reported as unavailable")
+	}
+	if fnProcessTextMediaOpts == nil {
+		t.Fatal("available optional symbol did not register")
+	}
+}
+
+func TestProcessTextWithMediaReportsUnsupportedNative(t *testing.T) {
+	previousCapability := hasProcessTextMedia
+	previousFn := fnProcessTextMediaOpts
+	t.Cleanup(func() {
+		hasProcessTextMedia = previousCapability
+		fnProcessTextMediaOpts = previousFn
+	})
+	hasProcessTextMedia = false
+	fnProcessTextMediaOpts = nil
+
+	h := &Handle{ptr: 1}
+	_, err := h.ProcessTextWithMedia("text", "source", nil)
+	if err == nil || err.Error() != "native library does not support text media processing" {
+		t.Fatalf("ProcessTextWithMedia error = %v, want unsupported error", err)
 	}
 }
 
@@ -143,6 +205,7 @@ func TestNewProcessEmbed(t *testing.T) {
 		t.Skip("skipping network asset download in short mode")
 	}
 	ResetLibraryForTest()
+	defer ResetLibraryForTest()
 	t.Setenv("CORTEXT_ASSETS_DIR", "")
 	t.Setenv("CORTEXT_LIBRARY_PATH", "")
 	t.Setenv("CORTEXT_AIST_MODEL_PATH", "")
@@ -153,6 +216,18 @@ func TestNewProcessEmbed(t *testing.T) {
 		t.Fatalf("LoadLibrary: %v", err)
 	}
 	t.Logf("using library %s version %s", LibraryPath(), Version())
+	if n := initNativeProcessOptions(); n.StructSize < unsafe.Offsetof(n.Reserved)+unsafe.Sizeof(n.Reserved) {
+		t.Fatalf("options layout %d bytes drops retention on %s", n.StructSize, Version())
+	}
+	filtered, err := New(":memory:", &Config{SignalFilterText: Ptr(false)})
+	if nativeIsEngineV5() {
+		if err != nil {
+			t.Fatalf("engine v5 rejected Config.SignalFilterText: %v", err)
+		}
+		filtered.Close()
+	} else if err == nil {
+		t.Fatal("pre-v5 native accepted a shifted Config field")
+	}
 
 	engine, err := New(":memory:", nil)
 	if err != nil {
@@ -160,7 +235,8 @@ func TestNewProcessEmbed(t *testing.T) {
 	}
 	defer engine.Close()
 
-	ctx, err := engine.ProcessText("Bailey likes tennis balls.", "chat/main")
+	ctx, err := engine.ProcessTextWithOptions("Bailey likes tennis balls.", "chat/main",
+		&ProcessOptions{Retention: RetentionDurable})
 	if err != nil {
 		t.Fatalf("ProcessText: %v", err)
 	}
@@ -183,6 +259,161 @@ func TestNewProcessEmbed(t *testing.T) {
 	}
 	if err := engine.Reset(); err != nil {
 		t.Fatalf("Reset: %v", err)
+	}
+}
+
+func TestMixedMemoryContentMimetypes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping native engine test in short mode")
+	}
+	ResetLibraryForTest()
+	if err := LoadLibrary(); err != nil {
+		t.Fatalf("LoadLibrary: %v", err)
+	}
+	requireEngineV5(t)
+	engine, err := New(filepath.Join(t.TempDir(), "mixed.db"), nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer engine.Close()
+
+	// One turn = one source: a text signal and its photo, as peers.
+	photo := []byte{0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0xff, 0xd9}
+	if _, err := engine.ProcessTextWithOptions("The parking garage ticket says level 4 spot 27.",
+		"chat/user/turn1", &ProcessOptions{Retention: RetentionNatural}); err != nil {
+		t.Fatalf("ProcessText: %v", err)
+	}
+	pixels := bytes.Repeat([]byte{128}, 8*8*3)
+	if _, err := engine.ProcessImageWithMediaAndOptions(pixels, 8, 8, 3, "chat/user/turn1",
+		&Media{Data: photo, MimeType: "image/jpeg"}, &ProcessOptions{Retention: RetentionDurable}); err != nil {
+		t.Fatalf("ProcessImageWithMedia: %v", err)
+	}
+	ctx, err := engine.ProcessTextWithOptions("parking garage level spot", "query/public",
+		&ProcessOptions{Retention: RetentionEphemeral})
+	if err != nil {
+		t.Fatalf("ProcessText query: %v", err)
+	}
+
+	var memories []any
+	for _, key := range []string{"retrieved_memory", "working_memory"} {
+		list, _ := ctx[key].([]any)
+		memories = append(memories, list...)
+	}
+	mixed := 0
+	for _, raw := range memories {
+		memory, _ := raw.(map[string]any)
+		if memory["modality"] != "mixed" {
+			continue
+		}
+		mixed++
+		var mimes []string
+		for _, c := range memory["content"].([]any) {
+			content := c.(map[string]any)
+			mime, _ := content["mimetype"].(string)
+			mimes = append(mimes, mime)
+			if mime == "image/jpeg" {
+				got, err := base64.StdEncoding.DecodeString(content["base64"].(string))
+				if err != nil || !bytes.Equal(got, photo) {
+					t.Fatalf("image payload = %v, %v; want %v", got, err, photo)
+				}
+			}
+		}
+		sort.Strings(mimes)
+		if strings.Join(mimes, ",") != "image/jpeg,text/plain" {
+			t.Fatalf("content mimetypes = %v", mimes)
+		}
+	}
+	if mixed == 0 {
+		t.Fatal("no mixed memory recalled")
+	}
+}
+
+func TestProcessOptionsCarryTheEvidenceBudget(t *testing.T) {
+	ResetLibraryForTest()
+	if err := LoadLibrary(); err != nil {
+		t.Skipf("LoadLibrary: %v", err)
+	}
+	requireEngineV5(t)
+	unset, err := makeNativeProcessOptions(nil)
+	if err != nil || unset.EvidenceBudgetBytes != 0 {
+		t.Fatalf("unset budget = %d (%v), want 0", unset.EvidenceBudgetBytes, err)
+	}
+	native, err := makeNativeProcessOptions(&ProcessOptions{Retention: RetentionEphemeral, EvidenceBudgetBytes: 34_800})
+	if err != nil {
+		t.Fatalf("budget options: %v", err)
+	}
+	if native.EvidenceBudgetBytes != 34_800 || native.Retention != retentionEphemeralC {
+		t.Fatalf("native options = %+v", native)
+	}
+	if native.StructSize != unsafe.Sizeof(native) {
+		t.Fatalf("struct size = %d, want %d", native.StructSize, unsafe.Sizeof(native))
+	}
+}
+
+func TestEvidenceBudgetBoundsStandingAndRetrieved(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping native engine test in short mode")
+	}
+	ResetLibraryForTest()
+	if err := LoadLibrary(); err != nil {
+		t.Fatalf("LoadLibrary: %v", err)
+	}
+	requireEngineV5(t)
+	engine, err := New(filepath.Join(t.TempDir(), "budget.db"), nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer engine.Close()
+	durable := &ProcessOptions{Retention: RetentionDurable}
+	if _, err := engine.ProcessTextWithOptions("Always answer with the departure pier.", "chat/rules", durable); err != nil {
+		t.Fatalf("ProcessText: %v", err)
+	}
+	for i := 0; i < 6; i++ {
+		text := fmt.Sprintf("The ferry to the island leaves at %d from pier four.", 6+i)
+		if _, err := engine.ProcessTextWithOptions(text, fmt.Sprintf("chat/ferry/%d", i), durable); err != nil {
+			t.Fatalf("ProcessText: %v", err)
+		}
+	}
+	evidence := func(ctx map[string]any) (bytes uint64, retrieved int) {
+		for _, key := range []string{"standing_memory", "retrieved_memory"} {
+			list, ok := ctx[key].([]any)
+			if !ok {
+				t.Fatalf("context has no %s array", key)
+			}
+			if key == "retrieved_memory" {
+				retrieved = len(list)
+			}
+			for _, raw := range list {
+				for _, c := range raw.(map[string]any)["content"].([]any) {
+					content := c.(map[string]any)
+					if strings.HasPrefix(content["mimetype"].(string), "text/") {
+						bytes += uint64(content["size_bytes"].(float64))
+					} else {
+						bytes += 480
+					}
+				}
+			}
+		}
+		return bytes, retrieved
+	}
+	query := "When does the ferry leave?"
+	whole, err := engine.ProcessTextWithOptions(query, "query/public", &ProcessOptions{Retention: RetentionEphemeral})
+	if err != nil {
+		t.Fatalf("ProcessText query: %v", err)
+	}
+	wholeBytes, wholeCount := evidence(whole)
+	if wholeCount < 2 {
+		t.Fatalf("whole packet retrieved %d memories", wholeCount)
+	}
+	budget := wholeBytes / 2
+	budgeted, err := engine.ProcessTextWithOptions(query, "query/public",
+		&ProcessOptions{Retention: RetentionEphemeral, EvidenceBudgetBytes: budget})
+	if err != nil {
+		t.Fatalf("ProcessText budgeted query: %v", err)
+	}
+	gotBytes, gotCount := evidence(budgeted)
+	if gotBytes > budget || gotCount >= wholeCount {
+		t.Fatalf("budgeted packet %d bytes / %d memories; budget %d, whole %d memories", gotBytes, gotCount, budget, wholeCount)
 	}
 }
 

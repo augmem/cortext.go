@@ -35,6 +35,8 @@ jobs:
         shell: bash
         env:
           CGO_ENABLED: "0"
+          # The pinned engine is v5: engine-v5 tests must run, never skip.
+          CORTEXT_REQUIRE_ENGINE_V5: "1"
         run: |
           go version
           go mod verify

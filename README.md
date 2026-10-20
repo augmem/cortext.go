@@ -11,12 +11,19 @@ cortext-assets-<version>.tar.gz
 cortext-assets-<version>.tar.gz.sha256
 ```
 
-Default assets version: **1.2.4** (`AssetsVersion`).
+Default assets version: **2.0.0** (`AssetsVersion`), i.e. engine v2.0.0.
 
 ## Install
 
+The module path is `github.com/augmem/cortext.go/v2` from v2.0.0 on (Go's
+major-version rule). Upgrading from v1 means changing the import path:
+
+```go
+import cortext "github.com/augmem/cortext.go/v2"
+```
+
 ```bash
-go get github.com/augmem/cortext.go@v1.2.4
+go get github.com/augmem/cortext.go/v2@v2.0.0
 ```
 
 ## Use
@@ -27,7 +34,7 @@ package main
 import (
 	"fmt"
 
-	cortext "github.com/augmem/cortext.go"
+	cortext "github.com/augmem/cortext.go/v2"
 )
 
 func main() {
@@ -51,10 +58,9 @@ func main() {
 }
 ```
 
-> The features below need an engine built from augmem/cortext.cpp `main`
-> (engine v5 or later). No engine release contains them yet, so the pinned
-> assets version still loads an older native; point `CORTEXT_LIBRARY_PATH` at a
-> newer build to use them.
+> The features below need engine v2.0.0 (engine v5) or later, which the
+> default assets version provides. An older native loaded through
+> `CORTEXT_LIBRARY_PATH` returns errors for the options it cannot read.
 
 ### Context packet
 
@@ -129,7 +135,7 @@ older layout so retention still applies.
 
 | Env | Purpose |
 | --- | --- |
-| `CORTEXT_ASSETS_VERSION` | Release version to fetch (default `1.2.4`) |
+| `CORTEXT_ASSETS_VERSION` | Release version to fetch (default `2.0.0`) |
 | `CORTEXT_ASSETS_DIR` | Pre-unpacked release tree (`native/` + `models/`) — skips download |
 | `CORTEXT_ASSETS_URL` | Override archive URL |
 | `CORTEXT_ASSETS_SHA256` | Override expected archive checksum |
@@ -167,13 +173,14 @@ export CORTEXT_ASSETS_DIR=/path/to/assets
 ```bash
 CGO_ENABLED=0 go test . -timeout 20m
 CGO_ENABLED=0 go test . -short   # no network
+CORTEXT_REQUIRE_ENGINE_V5=1 CGO_ENABLED=0 go test . -timeout 20m  # as CI: v5 tests fail instead of skipping
 ```
 
 ## Release
 
 ```bash
-git tag -a v1.2.4 -m "cortext.go v1.2.4"
-git push origin v1.2.4
+git tag -a v2.0.0 -m "cortext.go v2.0.0"
+git push origin v2.0.0
 ```
 
 Bump `AssetsVersion` in `version.go` when pinning a new augmem/cortext.cpp assets line.

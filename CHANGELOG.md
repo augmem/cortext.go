@@ -7,10 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Requires the next augmem/cortext.cpp release (engine v5, cortext.cpp `main`
-f0b681e9 or later). The pinned `AssetsVersion` is unchanged, so the default
-native does not provide these features yet; set `CORTEXT_LIBRARY_PATH` to a
-newer build.
+## [2.0.0] - 2026-10-20
+
+Requires engine v2.0.0 (augmem/cortext.cpp `v2.0.0`, engine v5): the C ABI
+changed, so this release follows the engine major version.
+
+### Changed
+
+- **Module path is now `github.com/augmem/cortext.go/v2`** (Go's major-version
+  rule). Update imports from `github.com/augmem/cortext.go`.
+- `AssetsVersion` and `ModuleVersion` are `2.0.0`: the default download is
+  `cortext-assets-2.0.0.tar.gz` (natives plus AIST and the LI reranker).
+- CI and the release hook set `CORTEXT_REQUIRE_ENGINE_V5=1`, so the engine v5
+  tests must run and pass rather than skip.
 
 ### Breaking
 
@@ -44,7 +53,7 @@ newer build.
 - `CORTEXT_LI_MODEL_PATH` is validated by `New` and forwarded to the native
   (through the CRT on Windows), like `CORTEXT_AIST_MODEL_PATH`.
 
-### Changed
+### Changed (compatibility)
 
 - Options the loaded native cannot read (an evidence budget or reference time
   on an older engine) return an error instead of being silently ignored.
@@ -97,7 +106,8 @@ newer build.
 - `scripts/build_native.py` and `scripts/shard_model.py` for refreshing artifacts
 - GitHub Actions CI and GoReleaser release workflow
 
-[Unreleased]: https://github.com/augmem/cortext.go/compare/v1.2.4...HEAD
+[Unreleased]: https://github.com/augmem/cortext.go/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/augmem/cortext.go/compare/v1.2.4...v2.0.0
 [1.2.4]: https://github.com/augmem/cortext.go/releases/tag/v1.2.4
 [1.2.2]: https://github.com/augmem/cortext.go/compare/v1.2.2...v1.2.4
 [1.2.1]: https://github.com/augmem/cortext.go/releases/tag/v1.2.1

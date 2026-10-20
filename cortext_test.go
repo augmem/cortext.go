@@ -219,7 +219,13 @@ func TestNewProcessEmbed(t *testing.T) {
 	if n := initNativeProcessOptions(); n.StructSize < unsafe.Offsetof(n.Reserved)+unsafe.Sizeof(n.Reserved) {
 		t.Fatalf("options layout %d bytes drops retention on %s", n.StructSize, Version())
 	}
-	if _, err := New(":memory:", &Config{SignalFilterText: Ptr(false)}); !nativeIsEngineV5() && err == nil {
+	filtered, err := New(":memory:", &Config{SignalFilterText: Ptr(false)})
+	if nativeIsEngineV5() {
+		if err != nil {
+			t.Fatalf("engine v5 rejected Config.SignalFilterText: %v", err)
+		}
+		filtered.Close()
+	} else if err == nil {
 		t.Fatal("pre-v5 native accepted a shifted Config field")
 	}
 

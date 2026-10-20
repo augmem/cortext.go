@@ -33,12 +33,21 @@ func openLocalEngine(t *testing.T, name string) *Handle {
 }
 
 // requireEngineV5 skips when the loaded native predates the reference-time
-// options layout (for example the pinned release assets).
+// options layout (an older CORTEXT_LIBRARY_PATH build). With
+// CORTEXT_REQUIRE_ENGINE_V5=1, as in CI, that is a failure instead.
 func requireEngineV5(t *testing.T) {
 	t.Helper()
 	if initNativeProcessOptions().StructSize < unsafe.Sizeof(nativeProcessOptions{}) {
-		t.Skipf("native %s %s predates engine v5 reference time", LibraryPath(), Version())
+		skipUnlessV5Required(t, "native %s %s predates engine v5 reference time", LibraryPath(), Version())
 	}
+}
+
+func skipUnlessV5Required(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("CORTEXT_REQUIRE_ENGINE_V5") == "1" {
+		t.Fatalf("CORTEXT_REQUIRE_ENGINE_V5=1: "+format, args...)
+	}
+	t.Skipf(format, args...)
 }
 
 type packetContent struct {
@@ -396,7 +405,7 @@ func TestMaterializeModelPlacesLateInteractionBesideAIST(t *testing.T) {
 	}
 	li, err := findModelAsset(manifest, liModelAssetName)
 	if err != nil {
-		t.Skipf("models tree predates the LI reranker: %v", err)
+		skipUnlessV5Required(t, "models tree predates the LI reranker: %v", err)
 	}
 	cache := t.TempDir()
 	model, err := materializeModelLocked(cache, modelsRoot)
@@ -420,7 +429,17 @@ func TestModelEnvRejectsMissingLateInteractionPath(t *testing.T) {
 func TestNewHonorsLateInteractionModelPath(t *testing.T) {
 	li := os.Getenv("CORTEXT_LI_MODEL_PATH")
 	if li == "" {
-		t.Skip("CORTEXT_LI_MODEL_PATH not set")
+		// Materialize the release reranker and point the engine at it.
+		modelsRoot := localModelsRoot(t)
+		model, err := materializeModelLocked(t.TempDir(), modelsRoot)
+		if err != nil {
+			t.Fatalf("materialize: %v", err)
+		}
+		li = filepath.Join(filepath.Dir(model), "AIST-87M-LI.gguf")
+		if _, err := os.Stat(li); err != nil {
+			skipUnlessV5Required(t, "models tree has no LI reranker: %v", err)
+		}
+		t.Setenv("CORTEXT_LI_MODEL_PATH", li)
 	}
 	engine := openLocalEngine(t, "li.db")
 	if _, err := engine.ProcessText("Bailey likes tennis balls.", "chat/main"); err != nil {
@@ -429,13 +448,20 @@ func TestNewHonorsLateInteractionModelPath(t *testing.T) {
 }
 
 // localModelsRoot resolves a models tree (manifest.json plus assembled files
-// or chunks) from CORTEXT_ASSETS_DIR: either the models tree itself or a
-// release tree containing models/.
+// or chunks) from CORTEXT_ASSETS_DIR, either the models tree itself or a
+// release tree containing models/, else from the downloaded release assets.
 func localModelsRoot(t *testing.T) string {
 	t.Helper()
 	dir := strings.TrimSpace(os.Getenv("CORTEXT_ASSETS_DIR"))
 	if dir == "" {
-		t.Skip("CORTEXT_ASSETS_DIR not set")
+		if testing.Short() {
+			t.Skip("skipping release asset download in short mode")
+		}
+		root, err := EnsureAssets()
+		if err != nil {
+			t.Fatalf("EnsureAssets: %v", err)
+		}
+		return modelsRootFromAssets(root)
 	}
 	for _, root := range []string{dir, filepath.Join(dir, "models")} {
 		if st, err := os.Stat(filepath.Join(root, "manifest.json")); err == nil && !st.IsDir() {

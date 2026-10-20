@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (zero returns recalled memories whole). Requires an engine with the field.
 - README: query contexts lead with `standing_memory`, ahead of
   `retrieved_memory`.
+- Text processing with arbitrary source media payloads and MIME types through
+  `ProcessTextWithMedia` and JSON/options variants.
 
 ## [1.2.4] - 2026-07-24
 

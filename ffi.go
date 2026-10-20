@@ -47,25 +47,30 @@ const (
 
 // Registered C ABI entry points (purego, no CGO).
 var (
-	fnConfigInit              func(*nativeConfig)
-	fnCreateWithConfig        func(*nativeConfig, string) uintptr
-	fnFree                    func(uintptr)
-	fnProcessTextJSONOpts     func(uintptr, string, string, *nativeProcessOptions) uintptr
-	fnEmbedTextJSON           func(uintptr, string) uintptr
-	fnProcessAudioJSONOpts    func(uintptr, *float32, uintptr, string, *nativeProcessOptions) uintptr
-	fnProcessAudioMediaOpts   func(uintptr, *float32, uintptr, string, *nativeMedia, *nativeProcessOptions) uintptr
-	fnEmbedAudioJSON          func(uintptr, *float32, uintptr) uintptr
-	fnProcessImageJSONOpts    func(uintptr, *byte, int32, int32, int32, string, *nativeProcessOptions) uintptr
-	fnProcessImageMediaOpts   func(uintptr, *byte, int32, int32, int32, string, *nativeMedia, *nativeProcessOptions) uintptr
-	fnEmbedImageJSON          func(uintptr, *byte, int32, int32, int32) uintptr
-	fnConsolidateJSON         func(uintptr) uintptr
-	fnFlush                   func(uintptr) int32
-	fnReset                   func(uintptr) int32
-	fnVersion                 func() string
-	fnLastError               func() string
-	fnStringFree              func(uintptr)
-	fnProcessJSONOptionsInit  func(*nativeProcessOptions)
+	fnConfigInit             func(*nativeConfig)
+	fnCreateWithConfig       func(*nativeConfig, string) uintptr
+	fnFree                   func(uintptr)
+	fnProcessTextJSONOpts    func(uintptr, string, string, *nativeProcessOptions) uintptr
+	fnProcessTextMediaOpts   func(uintptr, string, string, *nativeMedia, *nativeProcessOptions) uintptr
+	fnEmbedTextJSON          func(uintptr, string) uintptr
+	fnProcessAudioJSONOpts   func(uintptr, *float32, uintptr, string, *nativeProcessOptions) uintptr
+	fnProcessAudioMediaOpts  func(uintptr, *float32, uintptr, string, *nativeMedia, *nativeProcessOptions) uintptr
+	fnEmbedAudioJSON         func(uintptr, *float32, uintptr) uintptr
+	fnProcessImageJSONOpts   func(uintptr, *byte, int32, int32, int32, string, *nativeProcessOptions) uintptr
+	fnProcessImageMediaOpts  func(uintptr, *byte, int32, int32, int32, string, *nativeMedia, *nativeProcessOptions) uintptr
+	fnEmbedImageJSON         func(uintptr, *byte, int32, int32, int32) uintptr
+	fnConsolidateJSON        func(uintptr) uintptr
+	fnFlush                  func(uintptr) int32
+	fnReset                  func(uintptr) int32
+	fnVersion                func() string
+	fnLastError              func() string
+	fnStringFree             func(uintptr)
+	fnProcessJSONOptionsInit func(*nativeProcessOptions)
 )
+
+// hasProcessTextMedia reports whether the loaded native library provides the
+// optional text-media processing entry point.
+var hasProcessTextMedia bool
 
 func registerFuncs(handle uintptr) (err error) {
 	defer func() {
@@ -74,10 +79,14 @@ func registerFuncs(handle uintptr) (err error) {
 		}
 	}()
 
+	hasProcessTextMedia = false
 	purego.RegisterLibFunc(&fnConfigInit, handle, "cortext_config_init")
 	purego.RegisterLibFunc(&fnCreateWithConfig, handle, "cortext_create_with_config")
 	purego.RegisterLibFunc(&fnFree, handle, "cortext_free")
 	purego.RegisterLibFunc(&fnProcessTextJSONOpts, handle, "cortext_process_text_json_with_options")
+	hasProcessTextMedia = registerOptionalProcessTextMedia(func() {
+		purego.RegisterLibFunc(&fnProcessTextMediaOpts, handle, "cortext_process_text_with_media_json_with_options")
+	})
 	purego.RegisterLibFunc(&fnEmbedTextJSON, handle, "cortext_embed_text_json")
 	purego.RegisterLibFunc(&fnProcessAudioJSONOpts, handle, "cortext_process_audio_json_with_options")
 	purego.RegisterLibFunc(&fnProcessAudioMediaOpts, handle, "cortext_process_audio_with_media_json_with_options")
@@ -93,6 +102,19 @@ func registerFuncs(handle uintptr) (err error) {
 	purego.RegisterLibFunc(&fnStringFree, handle, "cortext_string_free")
 	purego.RegisterLibFunc(&fnProcessJSONOptionsInit, handle, "cortext_process_json_options_init")
 	return nil
+}
+
+// registerOptionalProcessTextMedia isolates purego's panic when a legacy
+// native library does not export the text-media symbol.
+func registerOptionalProcessTextMedia(register func()) (available bool) {
+	fnProcessTextMediaOpts = nil
+	defer func() {
+		if recover() != nil {
+			available = false
+		}
+	}()
+	register()
+	return true
 }
 
 func goStringFromC(ptr uintptr) string {

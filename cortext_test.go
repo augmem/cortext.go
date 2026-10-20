@@ -58,6 +58,7 @@ func TestLoadLibraryAndVersion(t *testing.T) {
 		t.Skip("skipping network asset download in short mode")
 	}
 	ResetLibraryForTest()
+	defer ResetLibraryForTest()
 	t.Setenv("CORTEXT_ASSETS_DIR", "")
 	t.Setenv("CORTEXT_LIBRARY_PATH", "")
 	cache := t.TempDir()
@@ -89,6 +90,62 @@ func TestValidateImageBuffer(t *testing.T) {
 	}
 	if err := validateImageBuffer(nil, 0, 1, 3); err == nil {
 		t.Fatal("non-positive dimensions were accepted")
+	}
+}
+
+func TestMakeNativeMediaPreservesArbitraryBinaryAndMIME(t *testing.T) {
+	data := []byte{0x00, 0xff, 0x01, 0x7f}
+	native, keep := makeNativeMedia(&Media{Data: data, MimeType: "application/octet-stream"})
+	if keep == nil {
+		t.Fatal("media keep-alive was nil")
+	}
+	if native.Data == nil || native.Size != uintptr(len(data)) {
+		t.Fatalf("native media data = %p size %d, want non-nil size %d", native.Data, native.Size, len(data))
+	}
+	got := unsafe.Slice(native.Data, int(native.Size))
+	if string(got) != string(data) {
+		t.Fatalf("native media data = %x, want %x", got, data)
+	}
+	if native.MimeType == nil || goStringFromC(uintptr(unsafe.Pointer(native.MimeType))) != "application/octet-stream" {
+		t.Fatalf("native media MIME type was not preserved")
+	}
+	runtime.KeepAlive(keep)
+}
+
+func TestRegisterOptionalProcessTextMedia(t *testing.T) {
+	previous := fnProcessTextMediaOpts
+	t.Cleanup(func() { fnProcessTextMediaOpts = previous })
+
+	if registerOptionalProcessTextMedia(func() { panic("missing symbol") }) {
+		t.Fatal("missing optional symbol was reported as available")
+	}
+	if fnProcessTextMediaOpts != nil {
+		t.Fatal("missing optional symbol left a callable function")
+	}
+
+	fn := func(uintptr, string, string, *nativeMedia, *nativeProcessOptions) uintptr { return 0 }
+	if !registerOptionalProcessTextMedia(func() { fnProcessTextMediaOpts = fn }) {
+		t.Fatal("available optional symbol was reported as unavailable")
+	}
+	if fnProcessTextMediaOpts == nil {
+		t.Fatal("available optional symbol did not register")
+	}
+}
+
+func TestProcessTextWithMediaReportsUnsupportedNative(t *testing.T) {
+	previousCapability := hasProcessTextMedia
+	previousFn := fnProcessTextMediaOpts
+	t.Cleanup(func() {
+		hasProcessTextMedia = previousCapability
+		fnProcessTextMediaOpts = previousFn
+	})
+	hasProcessTextMedia = false
+	fnProcessTextMediaOpts = nil
+
+	h := &Handle{ptr: 1}
+	_, err := h.ProcessTextWithMedia("text", "source", nil)
+	if err == nil || err.Error() != "native library does not support text media processing" {
+		t.Fatalf("ProcessTextWithMedia error = %v, want unsupported error", err)
 	}
 }
 
@@ -148,6 +205,7 @@ func TestNewProcessEmbed(t *testing.T) {
 		t.Skip("skipping network asset download in short mode")
 	}
 	ResetLibraryForTest()
+	defer ResetLibraryForTest()
 	t.Setenv("CORTEXT_ASSETS_DIR", "")
 	t.Setenv("CORTEXT_LIBRARY_PATH", "")
 	t.Setenv("CORTEXT_AIST_MODEL_PATH", "")

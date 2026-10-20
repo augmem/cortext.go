@@ -43,6 +43,16 @@ func main() {
 	}
 	fmt.Println(ctx["should_interrupt"])
 
+	// Attach arbitrary binary source media without changing the text signal.
+	withMedia, err := engine.ProcessTextWithMedia(
+		"Bailey sent a voice note.", "chat/main",
+		&cortext.Media{Data: []byte{0x00, 0xff, 0x01}, MimeType: "audio/ogg"},
+	)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(withMedia["should_interrupt"])
+
 	embedding, err := engine.EmbedText("embed without storing")
 	if err != nil {
 		panic(err)
@@ -69,6 +79,11 @@ Each memory in `standing_memory` / `retrieved_memory` / `working_memory` carries
 signal payload of the memory as `{size_bytes, mimetype, base64}`, in signal
 order. `modality` is the modality its signals share, or `"mixed"` when they
 differ (for example a turn's text and the photo sent with it under one source).
+
+`ProcessText` remains available for text-only input. To retain source media
+alongside text, use `ProcessTextWithMedia` (or its `JSON`/
+`WithMediaAndOptions` variants). `Media.Data` is passed as arbitrary binary and
+`Media.MimeType` is preserved as supplied.
 
 ## Assets
 

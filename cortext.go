@@ -190,6 +190,40 @@ func (h *Handle) ProcessTextWithOptions(text string, sourceID string, options *P
 	return decodeJSONObject(h.ProcessTextJSONWithOptions(text, sourceID, options))
 }
 
+// ProcessTextWithMediaJSON processes text while retaining arbitrary source media
+// bytes and their MIME type alongside the text signal.
+func (h *Handle) ProcessTextWithMediaJSON(text string, sourceID string, media *Media) ([]byte, error) {
+	return h.ProcessTextWithMediaJSONWithOptions(text, sourceID, media, nil)
+}
+
+// ProcessTextWithMediaJSONWithOptions is ProcessTextWithMediaJSON with result
+// embedding and retention controls.
+func (h *Handle) ProcessTextWithMediaJSONWithOptions(text string, sourceID string, media *Media, options *ProcessOptions) ([]byte, error) {
+	if err := h.require(); err != nil {
+		return nil, err
+	}
+	if !hasProcessTextMedia {
+		return nil, errors.New("native library does not support text media processing")
+	}
+	nativeMedia, keep := makeNativeMedia(media)
+	nativeOptions := makeNativeProcessOptions(options)
+	raw := fnProcessTextMediaOpts(h.ptr, text, sourceID, &nativeMedia, &nativeOptions)
+	runtime.KeepAlive(keep)
+	runtime.KeepAlive(h)
+	return takeJSONString(raw)
+}
+
+// ProcessTextWithMedia processes text with optional arbitrary source media.
+func (h *Handle) ProcessTextWithMedia(text string, sourceID string, media *Media) (map[string]any, error) {
+	return decodeJSONObject(h.ProcessTextWithMediaJSON(text, sourceID, media))
+}
+
+// ProcessTextWithMediaAndOptions processes text with source media and result
+// embedding/retention controls.
+func (h *Handle) ProcessTextWithMediaAndOptions(text string, sourceID string, media *Media, options *ProcessOptions) (map[string]any, error) {
+	return decodeJSONObject(h.ProcessTextWithMediaJSONWithOptions(text, sourceID, media, options))
+}
+
 func (h *Handle) EmbedTextJSON(text string) ([]byte, error) {
 	if err := h.require(); err != nil {
 		return nil, err
